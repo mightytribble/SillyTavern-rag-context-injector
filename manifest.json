@@ -5,9 +5,9 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "SillyTavern Extension",
+    "author": "mightytribble",
     "version": "1.0.0",
-    "homePage": "",
+    "homePage": "https://github.com/mightytribble/rag-context-injector",
     "dependencies": [
         "connection-manager"
     ],

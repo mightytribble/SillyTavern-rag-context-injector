@@ -1,3 +1,95 @@
-h1. Readme
+# README
 
-Nothing to see yet.
+A SillyTavern extension that enables generative RAG, kinda.
+
+**WARNING**: This is a work in progress and is not yet ready for production use. Specifically, it requires a monkeypatch to the SillyTavern codebase to work (adding some stuff to custom-request.js to support stuff other than temperature). 
+
+## Overview
+
+This extension intercepts a chat completion request, selects the last N messages, and then sends those along with a custom prompt and additional context to a user-defined second (cheaper?) tool-using model that is attached to a datastore. That model intelligently queries the datastore, generates a response based on what it finds, then injects that response into the original request. The original model then generates a response based on the combined context.
+
+It's designed specifically for Google Vertex AI Search and Gemini 2.5 Flash thinking, but should work with any tool-using model.
+
+## Yes, okay, but WHY?
+
+The use case I'm solving for is searching chat logs and interpreting them in a way that makes sense for the main model to process. Traditional vector lookups on raw-ish chat logs doesn't work so well! I wanted to be able to lightly edit (long) chat logs, upload them to a Google Vertex AI Search datastore, and then have an inline, cheap, tool-calling model query that datastore and inject the retrieved context into the main model's request just before the last message. Being able to give the RAG model some specific context cues (like the last 10 messages along with the character description and current scenario), and then asking it to answer some specific questions (like, 'what does {{char}} know about the people in the room?') is super helpful for getting it to focus on the right stuff. And being able to dynamically inject this just before last message helps preserve cache on those big long expensive chats.
+
+While the primary use case is making those chat logs work better, it's not limited to that! For example, you could use it with a Gamesmaster character to search through source material about the game world that would otherwise be a stupid amount of wasted context, enabling "just in time" background information or rules lookups.
+
+## Yes, okay, but Why ~~Male Models~~ Google Vertex AI Search?
+
+It's a happy middle between the complexity of roll-your-own DIY RAG and the Gemini file_search API. It's not too expensive (10GB free storage, 10K free requests/month), and it's easy to use and manage - just upload chatlogs to a GCP Storage Bucket and tell AI Search to index it. And if you need to process image-based PDFs, you can do that easily! (Yes this bit you pay for, but it's not too expensive and it works surprisingly well!). 
+
+## Features
+
+- Injects retrieval tools and configuration into chat completion requests, allowing the model to query RAG systems via tool calling.
+- Supports multiple retrieval providers (Vertex AI Search, Google Search, Custom JSON).
+- Allows for flexible configuration of retrieval settings, including maximum results and maximum tokens.
+- Supports function calling and retrieval tools.
+- Allows for custom system prompts and queries with familiar macros you know and love.
+
+## Installation
+
+1. Download the extension from the [Releases](https://github.com/mightytribble/rag-context-injector/releases) page.
+2. Extract the contents of the downloaded zip file.
+3. Copy the extracted folder to the `scripts/extensions/third-party` directory of your SillyTavern installation.
+4. Restart SillyTavern.
+
+## Setup
+
+1. Get Ye A Datastore! Instructions not included but you'll need a datastore with content in it, and a model that can use a tool that connects to that datastore. 
+2. ~~Profit!~~ Create a connection profile for the RAG processing model you want to use. Call it something useful like "Vertex AI Search" or "RAG Profile".
+3. Create a Chat Completion Preset for your new connection profile. Turn on thinking, set a budget (I do max, YOLO), turn streaming off, adjust temp etc to taste. Save it, make sure it's associated with your new connection profile. 
+4. Remember to set your connection profile and Chat Completion Preset back to your main model after you're done! Otherwise you'll be sad.
+5. Configure the extension in the SillyTavern settings, including customizing your RAG Query Template.
+6. Profit!
+
+## Sample RAG Query Template
+
+A template speaks a thousand tokens.
+
+```
+Your task is to search {{characterName}}'s memories for relevant context for this conversation:
+
+<conversation>
+{{messages:-10:-1}}
+</conversation>
+
+The scenario in which this conversation is occuring is:
+
+<scenario>
+{{scenario}}
+</scenario>
+
+You must use the available tools to query {{characterName}}'s memories. Write your reply as a series of memory statements recounting your findings, e.g. "{{characterName}} remembers X, Y and Z".
+
+Remember, you MUST use a tool to find more information. Think step-by-step about what questions you could ask the tool to retrieve more information. Be verbose and thorough in your investigation. Consider asking:
+- what does {{characterName}} know about the other people present?
+- what does {{characterName}} know about their current location?
+- what does {{characterName}} know about what has happened recently?
+
+Your final reply must ONLY be a series of memory statements.  Another assistant will use this information to construct a final reply.
+```
+
+### Supported Macros
+
+The RAG Query Template supports the following macros:
+- {{lastMessage}} - last message in chat history.
+- {{lastNMessages:5}} - last _N_ messages in chat history.
+- {{messages:X:Y}} - A range of messages in chat history, starting at 0 and going back. {{messages:-10:-2}} will get the last 10 messages, not including the last message. {{messages:-10:-1}} will get the last 10 messages, including the last message. Good if you use a prefill or post-history message and want to *not* send that to the RAG model!
+- {{recentHistory}} - last 10 messages in chat history.
+- {{fullHistory}} - full chat history.
+- {{characterName}} - the name of the AI's character.
+- {{userName}} - the name of the user's persona.
+- {{description}} - the description of the AI's character from the character card.
+- {{personality}} - the personality of the AI's character from the character card.
+- {{scenario}} - the scenario block from the character card.
+
+
+## Sample System Prompt Template
+
+The Extension defines its own system prompt (so whatever you have set up in your chat completion preset is ignored). Here's an example:
+
+```
+You are a context retrieval assistant. You MUST use your available tools to search for and retrieve information relevant to the query. Your job is to prepare information that will be used by another assistant to create a final response.
+```
