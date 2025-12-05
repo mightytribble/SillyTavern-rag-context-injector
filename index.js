@@ -238,7 +238,7 @@ function convertSillyTavernToOpenAI(chatMessages) {
 
 /**
  * Replace template variables in a string
- * Supports: {{lastMessage}}, {{lastNMessages:5}}, {{recentHistory}}, {{fullHistory}}, {{characterName}}, {{userName}}
+ * Supports: {{lastMessage}}, {{lastNMessages:5}}, {{recentHistory}}, {{fullHistory}}, {{characterName}}, {{userName}}, {{description}}, {{personality}}, {{scenario}}
  * @param {string} template 
  * @param {Array} promptMessages - Prompt messages (unused for history macros now, kept for compatibility)
  * @param {Object} extraReplacements - Additional key-value pairs for replacement (e.g. ragResponse)
@@ -253,6 +253,9 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     const context = getContext();
     const characterName = context?.name2 || "Assistant";
     const userName = context?.name1 || "User";
+    const description = context?.description || "";
+    const personality = context?.personality || "";
+    const scenario = context?.scenario || "";
 
     // Use global chat history for macros as it's more reliable than prompt messages
     // promptMessages only contains what's being sent to LLM (often truncated or system-only)
@@ -266,6 +269,9 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
         fullHistory: formatMessagesForContext(messages.filter(m => m.role !== "system")),
         characterName: characterName,
         userName: userName,
+        description: description,
+        personality: personality,
+        scenario: scenario,
     };
 
     // Merge with extra replacements (extras override base)
