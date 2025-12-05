@@ -1,0 +1,15 @@
+{
+    "display_name": "RAG Context Injector",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "SillyTavern Extension",
+    "version": "1.0.0",
+    "homePage": "",
+    "dependencies": [
+        "connection-manager"
+    ],
+    "i18n": {}
+}

@@ -1,0 +1,98 @@
+/* RAG Context Injector Extension Styles */
+
+#rag_context_injector_settings {
+    padding: 10px;
+}
+
+#rag_context_injector_settings .inline-drawer-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#rag_context_injector_settings .inline-drawer-icon {
+    width: 20px;
+    text-align: center;
+}
+
+#rag_context_injector_settings .rag-settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+#rag_context_injector_settings .rag-setting-row {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+#rag_context_injector_settings .rag-setting-row label {
+    font-weight: 500;
+    font-size: 0.9em;
+}
+
+#rag_context_injector_settings .rag-setting-row small {
+    color: var(--SmartThemeQuoteColor);
+    font-size: 0.8em;
+}
+
+#rag_context_injector_settings textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+#rag_context_injector_settings .rag-tools-section {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+#rag_context_injector_settings .rag-tools-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+#rag_context_injector_settings .rag-tool-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    margin-bottom: 10px;
+    background: var(--SmartThemeBlurTintColor);
+}
+
+#rag_context_injector_settings .rag-tool-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#rag_context_injector_settings .rag-tool-name {
+    font-weight: bold;
+}
+
+#rag_context_injector_settings .rag-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.8em;
+}
+
+#rag_context_injector_settings .rag-status-indicator.enabled {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+}
+
+#rag_context_injector_settings .rag-status-indicator.disabled {
+    background: rgba(158, 158, 158, 0.2);
+    color: #9E9E9E;
+}

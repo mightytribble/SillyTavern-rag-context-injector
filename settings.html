@@ -1,0 +1,157 @@
+<div id="rag_context_injector_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <div class="inline-drawer-icon fa-solid fa-database"></div>
+            <b>RAG Context Injector</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div class="rag-settings-content">
+                <!-- Enable/Disable Toggle -->
+                <div class="rag-setting-row">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="rag_enabled" />
+                        <span>Enable RAG Context Injection</span>
+                    </label>
+                    <small>Sends a separate request to query RAG before each generation.</small>
+                </div>
+
+                <hr>
+
+                <!-- RAG Model Profile Selector (Required) -->
+                <div id="rag_model_profile_section" class="rag-setting-row">
+                    <label for="rag_model_profile">RAG Model Profile</label>
+                    <select id="rag_model_profile" class="text_pole">
+                        <option value="">-- Select Profile --</option>
+                    </select>
+                    <small>Connection profile for the model that will handle RAG queries with tools.</small>
+                </div>
+
+                <hr>
+
+                <!-- Tool Type Selection -->
+                <div class="rag-setting-row">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="rag_use_native_retrieval" />
+                        <span>Use Native Retrieval</span>
+                    </label>
+                    <small>Use platform-native retrieval (Vertex AI, Google Search) instead of function calling.</small>
+                </div>
+
+                <!-- Native Retrieval Settings -->
+                <div class="rag-native-settings">
+                    <div class="rag-setting-row">
+                        <label for="rag_retrieval_provider">Retrieval Provider</label>
+                        <select id="rag_retrieval_provider" class="text_pole">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="rag-setting-row rag-datastore-field">
+                        <label for="rag_datastore_id">Datastore ID</label>
+                        <input type="text" id="rag_datastore_id" class="text_pole"
+                            placeholder="projects/xxx/locations/global/collections/xxx/dataStores/xxx" />
+                    </div>
+
+                    <div class="rag-setting-row rag-custom-json-field">
+                        <label for="rag_custom_retrieval_json">Custom Tool JSON</label>
+                        <textarea id="rag_custom_retrieval_json" class="text_pole" rows="3"
+                            placeholder='{"retrieval": {...}}'></textarea>
+                    </div>
+                </div>
+
+                <!-- Function Calling Settings -->
+                <div class="rag-function-settings">
+                    <div class="rag-setting-row">
+                        <label for="rag_tool_name">Tool Name</label>
+                        <input type="text" id="rag_tool_name" class="text_pole" value="search_knowledge_base" />
+                    </div>
+
+                    <div class="rag-setting-row">
+                        <label for="rag_tool_description">Tool Description</label>
+                        <textarea id="rag_tool_description" class="text_pole"
+                            rows="2">Search the knowledge base for relevant information</textarea>
+                    </div>
+
+                    <div class="rag-setting-row">
+                        <label for="rag_max_results">Max Results</label>
+                        <input type="number" id="rag_max_results" class="text_pole" min="1" max="50" value="5" />
+                    </div>
+                </div>
+
+                <!-- Tool Choice -->
+                <div class="rag-setting-row">
+                    <label for="rag_tool_choice">Tool Choice</label>
+                    <select id="rag_tool_choice" class="text_pole">
+                        <option value="auto">Auto</option>
+                        <option value="required">Required</option>
+                    </select>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label for="rag_max_tokens">Max Tokens for RAG Response</label>
+                    <input type="number" id="rag_max_tokens" class="text_pole" min="50" max="4096" value="1000" />
+                </div>
+
+                <hr>
+
+                <!-- RAG Query Prompts -->
+                <div class="rag-setting-row">
+                    <label for="rag_system_prompt">RAG System Prompt</label>
+                    <textarea id="rag_system_prompt" class="text_pole" rows="2"
+                        placeholder="You are a context retrieval assistant..."></textarea>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label for="rag_user_prompt_template">RAG Query Template</label>
+                    <textarea id="rag_user_prompt_template" class="text_pole" rows="2"
+                        placeholder="Find relevant context for: {{lastMessage}}"></textarea>
+                    <small>Use {{lastMessage}} for the latest user message.</small>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label for="rag_injection_template">Context Injection Template</label>
+                    <textarea id="rag_injection_template" class="text_pole" rows="2"
+                        placeholder="[Context]\n{{ragResponse}}\n[End]"></textarea>
+                    <small>Use {{ragResponse}} for the RAG model's response.</small>
+                </div>
+
+                <hr>
+
+                <!-- Optional Profile Filter -->
+                <div id="rag_profile_filter_section">
+                    <div class="rag-setting-row">
+                        <label class="checkbox_label">
+                            <input type="checkbox" id="rag_filter_by_profile" />
+                            <span>Only run RAG for specific profile</span>
+                        </label>
+                    </div>
+
+                    <div class="rag-setting-row">
+                        <label for="rag_filter_profile">Filter Profile</label>
+                        <select id="rag_filter_profile" class="text_pole">
+                            <option value="">-- Any Profile --</option>
+                        </select>
+                        <small>Only inject RAG when using this main profile.</small>
+                    </div>
+                </div>
+
+                <!-- System Prompt Addition -->
+                <div class="rag-setting-row">
+                    <label for="rag_system_prompt_addition">System Prompt Addition</label>
+                    <textarea id="rag_system_prompt_addition" class="text_pole" rows="1"
+                        placeholder="Additional instructions..."></textarea>
+                    <small>Appended to main request's system prompt.</small>
+                </div>
+
+                <!-- Debug Mode -->
+                <div class="rag-setting-row">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="rag_debug_mode" />
+                        <span>Debug Mode</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
