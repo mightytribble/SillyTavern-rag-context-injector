@@ -60,24 +60,26 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 A template speaks a thousand tokens.
 
 ```
-Your task is to search {{characterName}}'s memories for relevant context for this conversation:
+Your task is to search {{char}}'s memories for relevant context for this conversation:
 
 <conversation>
-{{messages:-10:-1}}
+{{messages:-15:-1}}
 </conversation>
 
-The scenario in which this conversation is occuring is:
+The scenario in which this conversation is occurring is (this might be blank):
 
 <scenario>
 {{scenario}}
 </scenario>
 
-You must use the available tools to query {{characterName}}'s memories. Write your reply as a series of memory statements recounting your findings, e.g. "{{characterName}} remembers X, Y and Z".
+You MUST use the provided tool to query {{char}}'s memories in the knowledge base. Write your reply as a series of memory statements recounting your findings, e.g. "{{char}} remembers X, Y and Z".
 
-Remember, you MUST use a tool to find more information. Think step-by-step about what questions you could ask the tool to retrieve more information. Be verbose and thorough in your investigation. Consider asking:
-- what does {{characterName}} know about the other people present?
-- what does {{characterName}} know about their current location?
-- what does {{characterName}} know about what has happened recently?
+Only include memories retrieved from the knowledge base with the tool. Do NOT include memories that just restate information provided in <conversation> or <scenario>. 
+
+Remember, you MUST use the provided tool to find more information. Think step-by-step about what questions you could ask the tool to retrieve more information. Be verbose and thorough in your investigation. Consider asking:
+- what does {{char}} know about the other people present?
+- what does {{char}} know about their current location?
+- what does {{char}} know about what has happened recently?
 
 Your final reply must ONLY be a series of memory statements.  Another assistant will use this information to construct a final reply.
 ```
