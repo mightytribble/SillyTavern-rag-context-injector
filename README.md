@@ -90,8 +90,8 @@ The RAG Query Template supports the following macros:
 - {{messages:X:Y}} - A range of messages in chat history, starting at 0 and going back. {{messages:-10:-2}} will get the last 10 messages, not including the last message. {{messages:-10:-1}} will get the last 10 messages, including the last message. Good if you use a prefill or post-history message and want to *not* send that to the RAG model!
 - {{recentHistory}} - last 10 messages in chat history.
 - {{fullHistory}} - full chat history.
-- {{characterName}} - the name of the AI's character. Note it's not {{char}} because I'm dumb. I should fix this.
-- {{userName}} - the name of the user's persona. Ditto it's not {{user}} because I'm still dumb.
+- {{char}} - the name of the AI's character (also {{characterName}} for backward compatibility).
+- {{user}} - the name of the user's persona (also {{userName}} for backward compatibility).
 - {{description}} - the description of the AI's character from the character card.
 - {{personality}} - the personality of the AI's character from the character card.
 - {{scenario}} - the scenario block from the character card.
