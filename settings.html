@@ -116,6 +116,40 @@
                     <small>Use {{ragResponse}} for the RAG model's response.</small>
                 </div>
 
+                <!-- Injection Placement Settings -->
+                <div class="rag-setting-row">
+                    <label for="rag_injection_role">Injection Role</label>
+                    <select id="rag_injection_role" class="text_pole">
+                        <option value="system">System</option>
+                        <option value="assistant">Assistant</option>
+                        <option value="user">User</option>
+                    </select>
+                    <small>Role of the injected message.</small>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label for="rag_injection_position">Injection Position</label>
+                    <select id="rag_injection_position" class="text_pole">
+                        <option value="start">Start of Chat</option>
+                        <option value="depth">Depth from End</option>
+                    </select>
+                    <small>Where to insert the context message.</small>
+                </div>
+
+                <div class="rag-setting-row rag-depth-field">
+                    <label for="rag_injection_depth">Injection Depth</label>
+                    <input type="number" id="rag_injection_depth" class="text_pole" value="-1" max="0" />
+                    <small>0 = end, -1 = before last message, -2 = before second-to-last, etc.</small>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="rag_injection_merge" />
+                        <span>Merge with Existing</span>
+                    </label>
+                    <small>Append to existing message if same role at target position.</small>
+                </div>
+
                 <hr>
 
                 <!-- Optional Profile Filter -->

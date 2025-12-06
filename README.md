@@ -111,7 +111,7 @@ The extension supports thinking (set it in your Chat Completion preset, setting 
 
 The extension supports 'forcing' tool use via the `Tool Choice: Required` option. Since this extension only configures one tool this effectively forces the model to use the retrieval tool. You should probably set this, as it's the whole point of the extension! This should work for both Gemini models and OAI-compatible tool calling.
 
-The extension inserts an Assistant message (or appends to an existing one) just before the last USER message. If you're using a Prefill that posts after the last user message, that will still post last as normal without any alteration. The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console you'll see it there. TODO is to add more customization around how the message is inserted - position in chat, role used, etc. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
+The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). If you're using a Prefill that posts after the last user message, that will still post last as normal without any alteration. The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
 
 ```
 I've conducted an initial search of the knowledge base for relevant memories. I've included anything I've found below (if it's blank, I didn't find anything relevant):
@@ -119,6 +119,24 @@ I've conducted an initial search of the knowledge base for relevant memories. I'
 {{ragResponse}}
 </memories>
 ```
+
+## Injection Placement Configuration
+
+Control where and how RAG context is injected:
+
+| Setting | Options | Description |
+|---------|---------|-------------|
+| **Injection Role** | `system`, `assistant`, `user` | Role of the injected message |
+| **Injection Position** | `start`, `depth` | Where to inject |
+| **Injection Depth** | 0, -1, -2, ... | Depth from end (only when Position = depth) |
+| **Merge with Existing** | checkbox | Append to existing message if same role |
+
+### Position Details
+- **Start of Chat**: Inserts after system messages, before first user/assistant message
+- **Depth from End**: `0` = append to end, `-1` = before last message, `-2` = before second-to-last, etc.
+
+### Default Behavior
+Assistant message, depth -1, no merge (matches original behavior).
 
 I tend to use a 'framing' Chat Completion preset that puts the entire chat history before some Assistant messages that frame the context injection. My Chat Completion presets look something like this (not the actual prompt, but illustrating the structure and content):
 
