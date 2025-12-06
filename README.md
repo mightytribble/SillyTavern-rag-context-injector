@@ -1,4 +1,4 @@
-# README
+# RAG Context Injector
 
 A SillyTavern extension that enables generative vector search via tool calling using a secondary model.
 
