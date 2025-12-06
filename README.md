@@ -35,12 +35,12 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 1. Open SillyTavern
 2. Go to the Extensions tab
 3. Click the "Install Extension" button
-4. Add `https://github.com/mightytribble/rag-context-injector` to the URL field
+4. Add `https://github.com/mightytribble/SillyTavern-rag-context-injector` to the URL field
 5. Click the "Install" button
 6. Restart SillyTavern
 
 ### Manual Installation
-1. Download the extension from the [Releases](https://github.com/mightytribble/rag-context-injector/releases) page.
+1. Download the extension from the [Releases](https://github.com/mightytribble/SillyTavern-rag-context-injector/releases) page.
 2. Extract the contents of the downloaded zip file.
 3. Copy the extracted folder to the `scripts/extensions/third-party` directory of your SillyTavern installation.
 4. Restart SillyTavern.
