@@ -91,6 +91,12 @@ const DEFAULT_SETTINGS = {
     // Injection Configuration
     injectionTemplate: "[Retrieved Context]\n{{ragResponse}}\n[End Context]",
 
+    // Injection Placement Configuration
+    injectionRole: "assistant",      // "system", "assistant", or "user"
+    injectionPosition: "depth",      // "start" or "depth"
+    injectionDepth: -1,              // 0 = end, -1 = before last, etc.
+    injectionMerge: false,           // Merge with existing message if same role
+
     // Additional context to inject
     systemPromptAddition: "",  // Text to append to system prompt
 
@@ -349,6 +355,66 @@ function reconstructMessages(data) {
 }
 
 /**
+ * Inject RAG context into messages array based on settings
+ * @param {Array} messages - The messages array to inject into
+ * @param {string} content - The content to inject
+ * @param {object} settings - The extension settings
+ */
+function injectRagContext(messages, content, settings) {
+    const role = settings.injectionRole;
+    const position = settings.injectionPosition;
+    const depth = settings.injectionDepth;
+    const merge = settings.injectionMerge;
+
+    // Find "start of chat" = index of first non-system message
+    function findStartIndex() {
+        for (let i = 0; i < messages.length; i++) {
+            if (messages[i].role !== "system") {
+                return i;
+            }
+        }
+        return messages.length; // All system or empty
+    }
+
+    // Calculate target index from depth (0 = end, -1 = before last, etc.)
+    function depthToIndex(d) {
+        // depth 0 means insert at end (after last message)
+        // depth -1 means insert before last message
+        // depth -N means insert before Nth-to-last message
+        const idx = messages.length + d;
+        return Math.max(0, Math.min(messages.length, idx));
+    }
+
+    // Determine target index
+    let targetIndex;
+    if (position === "start") {
+        targetIndex = findStartIndex();
+    } else {
+        targetIndex = depthToIndex(depth);
+    }
+
+    // Check for merge
+    if (merge && targetIndex > 0 && targetIndex <= messages.length) {
+        // Look at message AT the target position (or just before if at end)
+        const checkIndex = targetIndex < messages.length ? targetIndex : targetIndex - 1;
+        const existingMsg = messages[checkIndex];
+
+        if (existingMsg && existingMsg.role === role) {
+            existingMsg.content += "\n\n" + content;
+            debugLog(`Merged RAG context into existing ${role} message at index ${checkIndex}`);
+            return;
+        }
+    }
+
+    // Insert new message
+    messages.splice(targetIndex, 0, {
+        role: role,
+        content: content,
+    });
+    debugLog(`Inserted RAG context as ${role} at index ${targetIndex}`);
+}
+
+/**
  * Main injection handler - sends RAG request and injects response
  * Triggered by CHAT_COMPLETION_SETTINGS_READY event
  * @param {object} data - The request payload being prepared
@@ -482,32 +548,9 @@ async function onChatCompletionSettingsReady(data) {
         });
         debugLog("[[DEBUG]] Injection content:", injectionContent);
 
-        // Inject as an assistant message before the last user message
+        // Inject RAG context using configurable placement
         if (Array.isArray(data.messages) && data.messages.length > 0) {
-            // Find the last user message index
-            let lastUserIndex = -1;
-            for (let i = data.messages.length - 1; i >= 0; i--) {
-                if (data.messages[i].role === "user") {
-                    lastUserIndex = i;
-                    break;
-                }
-            }
-
-            if (lastUserIndex > 0) {
-                // Insert before the last user message
-                data.messages.splice(lastUserIndex, 0, {
-                    role: "assistant",
-                    content: injectionContent,
-                });
-                debugLog("Injected RAG context before last user message");
-            } else {
-                // Just append if we can't find a good place
-                data.messages.push({
-                    role: "assistant",
-                    content: injectionContent,
-                });
-                debugLog("Appended RAG context to messages");
-            }
+            injectRagContext(data.messages, injectionContent, settings);
         }
 
         // Optionally append to system prompt
@@ -552,6 +595,10 @@ function loadSettingsUI() {
     $("#rag_system_prompt").val(settings.ragSystemPrompt);
     $("#rag_user_prompt_template").val(settings.ragUserPromptTemplate);
     $("#rag_injection_template").val(settings.injectionTemplate);
+    $("#rag_injection_role").val(settings.injectionRole);
+    $("#rag_injection_position").val(settings.injectionPosition);
+    $("#rag_injection_depth").val(settings.injectionDepth);
+    $("#rag_injection_merge").prop("checked", settings.injectionMerge);
     $("#rag_system_prompt_addition").val(settings.systemPromptAddition);
     $("#rag_debug_mode").prop("checked", settings.debugMode);
 
@@ -560,6 +607,9 @@ function loadSettingsUI() {
 
     // Toggle visibility of native vs function settings
     updateToolTypeVisibility();
+
+    // Toggle visibility of depth field
+    updateInjectionPositionVisibility();
 }
 
 /**
@@ -575,6 +625,14 @@ function updateToolTypeVisibility() {
     // Show/hide provider-specific fields
     $(".rag-datastore-field").toggle(useNative && provider !== "googleSearch");
     $(".rag-custom-json-field").toggle(useNative && provider === "custom");
+}
+
+/**
+ * Toggle visibility of injection depth field based on position selection
+ */
+function updateInjectionPositionVisibility() {
+    const position = $("#rag_injection_position").val();
+    $(".rag-depth-field").toggle(position === "depth");
 }
 
 /**
@@ -611,6 +669,10 @@ function saveSettings() {
     settings.ragSystemPrompt = $("#rag_system_prompt").val();
     settings.ragUserPromptTemplate = $("#rag_user_prompt_template").val();
     settings.injectionTemplate = $("#rag_injection_template").val();
+    settings.injectionRole = $("#rag_injection_role").val();
+    settings.injectionPosition = $("#rag_injection_position").val();
+    settings.injectionDepth = parseInt($("#rag_injection_depth").val()) || -1;
+    settings.injectionMerge = $("#rag_injection_merge").prop("checked");
     settings.systemPromptAddition = $("#rag_system_prompt_addition").val();
     settings.debugMode = $("#rag_debug_mode").prop("checked");
 
@@ -714,6 +776,13 @@ jQuery(async () => {
     $("#rag_system_prompt").on("input", saveSettings);
     $("#rag_user_prompt_template").on("input", saveSettings);
     $("#rag_injection_template").on("input", saveSettings);
+    $("#rag_injection_role").on("change", saveSettings);
+    $("#rag_injection_position").on("change", () => {
+        updateInjectionPositionVisibility();
+        saveSettings();
+    });
+    $("#rag_injection_depth").on("input", saveSettings);
+    $("#rag_injection_merge").on("change", saveSettings);
     $("#rag_system_prompt_addition").on("input", saveSettings);
     $("#rag_debug_mode").on("change", saveSettings);
 
