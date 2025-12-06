@@ -111,7 +111,7 @@ The extension supports thinking (set it in your Chat Completion preset, setting 
 
 The extension supports 'forcing' tool use via the `Tool Choice: Required` option. Since this extension only configures one tool this effectively forces the model to use the retrieval tool. You should probably set this, as it's the whole point of the extension! This should work for both Gemini models and OAI-compatible tool calling.
 
-The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). If you're using a Prefill that posts after the last user message, that will still post last as normal without any alteration. The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
+The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
 
 ```
 I've conducted an initial search of the knowledge base for relevant memories. I've included anything I've found below (if it's blank, I didn't find anything relevant):
@@ -136,7 +136,11 @@ Control where and how RAG context is injected:
 - **Depth from End**: `0` = append to end, `-1` = before last message, `-2` = before second-to-last, etc.
 
 ### Default Behavior
-Assistant message, depth -1, no merge (matches original behavior).
+Assistant message, depth -1, no merge.
+
+Remember, if you use a 'prefill' that counts as a message (the last message, position 0) in the chat for purposes of placing the injection.
+
+Remember also if you've set your main Chat Completion Profile to 'squash system messages', the RAG context will be merged into the message at its assigned depth if it's a system or assistant role. 
 
 I tend to use a 'framing' Chat Completion preset that puts the entire chat history before some Assistant messages that frame the context injection. My Chat Completion presets look something like this (not the actual prompt, but illustrating the structure and content):
 
@@ -159,13 +163,11 @@ User: Cool, here's the chat history so far:
 {{fullHistory}}
 </chat_history>
 
-Assistant: Got it, looks cool, gtg.   <--- This is the last Assistant message, so rag-context-injector will insert the RAG results here.
+Assistant: Got it, looks cool, gtg.   <--- I set my injection depth to -1, so the RAG context is inserted here.
 
 User: OK, your task is to reply to the last message in the chat_history. For reference, the last message was:
 <last_message>
 {{lastMessage}}
 </last_message>
 When generating your reply, remember to do X, Y and Z...(general notes about the chat, etc) and follow the instructions.
-
-Assistant: If I had a prefill, this would be where the prefill would go. Prefill is added at the end of the entire chat, so it's not where rag-context-injector would put content.
 ```
