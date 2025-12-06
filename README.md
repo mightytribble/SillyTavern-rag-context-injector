@@ -2,7 +2,7 @@
 
 A SillyTavern extension that enables generative vector search via tool calling using a secondary model.
 
-**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) should end up in the next release (1.14). 
+**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) should end up in the next release (1.14.1+) 
 
 ## Overview
 
@@ -25,8 +25,8 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 - Injects retrieval tools and configuration into chat completion requests, allowing the model to query RAG systems via tool calling.
 - Supports multiple retrieval providers (Vertex AI Search, Google Search, Custom JSON).
 - Allows for flexible configuration of retrieval settings, including maximum results and maximum tokens.
-- Supports function calling and retrieval tools.
-- Allows for custom system prompts and queries with familiar macros you know and love.
+- Supports linking to a specific Connection Profile, so extension can be enabled by changing profiles.
+- Allows for custom system prompts and RAG queries with familiar macros you know and love.
 
 ## Installation
 
@@ -48,7 +48,7 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 
 ## Setup
 
-1. Get Ye A Datastore! Instructions not included but you'll need a datastore with content in it, and a model that can use a tool that connects to that datastore. 
+1. Get Ye A Datastore! Instructions not included but you'll need a datastore with content in it, and a model that can use a tool that connects to that datastore. This is not beginner-friendly! This extension was written primarily to support Google Vertex AI Search (with Gemini Pro 2.5 or 3.0 as the main model and Flash 2.5 Thinking as the RAG model), but it should work with any tool-using model. [Here's Google's documentation for creating a data store using content from a GCP Storage Bucket](https://docs.cloud.google.com/generative-ai-app-builder/docs/create-data-store-es#cloud-storage). If you just want to enable Google Vertex AI Search in your main model, you can use the much simpler [Google Vertex AI Search](https://github.com/mightytribble/SillyTavern-vertex-ai-search). But you'll still need a data store to point it at.
 2. ~~Profit!~~ Create a connection profile for the RAG processing model you want to use. Call it something useful like "Vertex AI Search" or "RAG Profile".
 3. Create a Chat Completion Preset for your new connection profile. Turn on thinking, set a budget (I do max, YOLO), turn streaming off, adjust temp etc to taste. Save it, make sure it's associated with your new connection profile. 
 4. Remember to set your connection profile and Chat Completion Preset back to your main model after you're done! Otherwise you'll be sad.
@@ -121,6 +121,8 @@ I've conducted an initial search of the knowledge base for relevant memories. I'
 {{ragResponse}}
 </memories>
 ```
+
+A real power move is to use this extension alongside my other, simpler [Google Vertex AI Search extension](https://github.com/mightytribble/SillyTavern-vertex-ai-search). This allows the RAG model to perform an initial search, and then gives the main model the option to perform an additional set of searches informed by the RAG model's findings: two bites from the apple! If you do this remember to adjust your main Chat Completion preset to prompt it appropriately. 
 
 ## Injection Placement Configuration
 
