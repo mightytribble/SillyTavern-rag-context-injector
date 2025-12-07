@@ -27,6 +27,7 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 - Allows for flexible configuration of retrieval settings, including maximum results and maximum tokens.
 - Supports linking to a specific Connection Profile, so extension can be enabled by changing profiles.
 - Allows for custom system prompts and RAG queries with familiar macros you know and love.
+- Optionally allow the main model to also query the data store to build on the RAG model's results.
 
 ## Installation
 
