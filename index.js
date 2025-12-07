@@ -97,6 +97,10 @@ const DEFAULT_SETTINGS = {
     injectionDepth: -1,              // 0 = end, -1 = before last, etc.
     injectionMerge: false,           // Merge with existing message if same role
 
+    // Main Model Tool Access
+    enableMainModelTools: false,      // Also add retrieval tool to main model request
+    mainModelToolChoice: "auto",      // Tool choice for main model: "auto", "required", "none"
+
     // Additional context to inject
     systemPromptAddition: "",  // Text to append to system prompt
 
@@ -566,6 +570,25 @@ async function onChatCompletionSettingsReady(data) {
         debugLog("RAG injection complete");
         debugLog("[[DEBUG]] data.messages after injection:", JSON.stringify(data.messages, null, 2));
 
+        // Optionally add retrieval tool to main model request
+        if (settings.enableMainModelTools) {
+            const mainTool = settings.useNativeRetrieval
+                ? buildRetrievalTool()
+                : buildFunctionTool();
+
+            if (mainTool) {
+                data.tools = data.tools || [];
+                data.tools.push(mainTool);
+
+                // Set tool_choice if not "auto" (auto is typically the default)
+                if (settings.mainModelToolChoice && settings.mainModelToolChoice !== "auto") {
+                    data.tool_choice = settings.mainModelToolChoice;
+                }
+
+                debugLog("Added retrieval tool to main model request with tool_choice:", settings.mainModelToolChoice);
+            }
+        }
+
 
     } catch (error) {
         console.error(DEBUG_PREFIX, "RAG request failed:", error);
@@ -601,6 +624,8 @@ function loadSettingsUI() {
     $("#rag_injection_position").val(settings.injectionPosition);
     $("#rag_injection_depth").val(settings.injectionDepth);
     $("#rag_injection_merge").prop("checked", settings.injectionMerge);
+    $("#rag_enable_main_model_tools").prop("checked", settings.enableMainModelTools);
+    $("#rag_main_model_tool_choice").val(settings.mainModelToolChoice);
     $("#rag_system_prompt_addition").val(settings.systemPromptAddition);
     $("#rag_debug_mode").prop("checked", settings.debugMode);
 
@@ -675,6 +700,8 @@ function saveSettings() {
     settings.injectionPosition = $("#rag_injection_position").val();
     settings.injectionDepth = parseInt($("#rag_injection_depth").val()) || -1;
     settings.injectionMerge = $("#rag_injection_merge").prop("checked");
+    settings.enableMainModelTools = $("#rag_enable_main_model_tools").prop("checked");
+    settings.mainModelToolChoice = $("#rag_main_model_tool_choice").val();
     settings.systemPromptAddition = $("#rag_system_prompt_addition").val();
     settings.debugMode = $("#rag_debug_mode").prop("checked");
 
@@ -785,6 +812,8 @@ jQuery(async () => {
     });
     $("#rag_injection_depth").on("input", saveSettings);
     $("#rag_injection_merge").on("change", saveSettings);
+    $("#rag_enable_main_model_tools").on("change", saveSettings);
+    $("#rag_main_model_tool_choice").on("change", saveSettings);
     $("#rag_system_prompt_addition").on("input", saveSettings);
     $("#rag_debug_mode").on("change", saveSettings);
 

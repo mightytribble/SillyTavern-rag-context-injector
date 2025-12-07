@@ -150,6 +150,24 @@
                     <small>Append to existing message if same role at target position.</small>
                 </div>
 
+                <div class="rag-setting-row">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="rag_enable_main_model_tools" />
+                        <span>Enable Main Model Tool Access</span>
+                    </label>
+                    <small>Also give the main model access to the retrieval tool.</small>
+                </div>
+
+                <div class="rag-setting-row">
+                    <label for="rag_main_model_tool_choice">Main Model Tool Choice</label>
+                    <select id="rag_main_model_tool_choice" class="text_pole">
+                        <option value="auto">Auto</option>
+                        <option value="required">Required</option>
+                        <option value="none">None</option>
+                    </select>
+                    <small>How the main model should use the tool.</small>
+                </div>
+
                 <hr>
 
                 <!-- Optional Profile Filter -->

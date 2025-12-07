@@ -122,7 +122,7 @@ I've conducted an initial search of the knowledge base for relevant memories. I'
 </memories>
 ```
 
-A real power move is to use this extension alongside my other, simpler [Google Vertex AI Search extension](https://github.com/mightytribble/SillyTavern-vertex-ai-search). This allows the RAG model to perform an initial search, and then gives the main model the option to perform an additional set of searches informed by the RAG model's findings: two bites from the apple! If you do this remember to adjust your main Chat Completion preset to prompt it appropriately. 
+A real power move is to enable the `Enable Main Model Tool Access` option. This allows the RAG model to perform an initial search, and then gives the main model the option to perform an additional set of searches informed by the RAG model's findings: two bites from the apple! If you do this remember to adjust your main Chat Completion preset to prompt it appropriately. With Gemini Pro 3.0 I've found that I really need to yell at it in the final user message, calling it lazy, to get it to use the tool consistently.
 
 ## Injection Placement Configuration
 
@@ -174,4 +174,8 @@ User: OK, your task is to reply to the last message in the chat_history. For ref
 {{lastMessage}}
 </last_message>
 When generating your reply, remember to do X, Y and Z...(general notes about the chat, etc) and follow the instructions.
+(This is where I yell at Gemini to use the tool if I'm trying to get the main model to query the data store as well)
+
+[ Optional prefill: if you do this remember it changes the injection depth to -2]
+Assistant: I understand, (repeat the key bits of the last instruction, optionally apologize for being lazy and pledge to work really hard this time)
 ```
