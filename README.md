@@ -135,6 +135,8 @@ Control where and how RAG context is injected:
 | **Injection Position** | `start`, `depth` | Where to inject |
 | **Injection Depth** | 0, -1, -2, ... | Depth from end (only when Position = depth) |
 | **Merge with Existing** | checkbox | Append to existing message if same role |
+| **Enable Main Model Tool Access** | checkbox | Also give the main model the retrieval tool |
+| **Main Model Tool Choice** | `auto`, `required`, `none` | How the main model should use the tool |
 
 ### Position Details
 - **Start of Chat**: Inserts after system messages, before first user/assistant message
@@ -146,6 +148,18 @@ Assistant message, depth -1, no merge.
 Remember, if you use a 'prefill' that counts as a message (the last message, position 0) in the chat for purposes of placing the injection.
 
 Remember also if you've set your main Chat Completion Profile to 'squash system messages', the RAG context will be merged into the message at its assigned depth if it's a system or assistant role. 
+
+## Additional Options
+
+### System Prompt Addition
+
+The **System Prompt Addition** field lets you append extra text to the main request's system prompt. This is useful for adding instructions that tell the main model how to use the RAG context or the retrieval tool (if enabled).
+
+### Profile Filter
+
+The **Only run RAG for specific profile** option restricts RAG processing to only activate when a specific Connection Profile is selected. This is useful if you want RAG enabled for some profiles but not others, without having to toggle the extension on and off.
+
+## Sample Chat Completion Preset Structure
 
 I tend to use a 'framing' Chat Completion preset that puts the entire chat history before some Assistant messages that frame the context injection. My Chat Completion presets look something like this (not the actual prompt, but illustrating the structure and content):
 
