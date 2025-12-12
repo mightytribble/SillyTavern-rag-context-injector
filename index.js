@@ -239,10 +239,20 @@ function convertSillyTavernToOpenAI(chatMessages) {
             role = "system";
         }
 
-        return {
+        const converted = {
             role: role,
             content: msg.mes || ""
         };
+
+        if (msg.name) {
+            converted.name = msg.name;
+        }
+
+        if (msg.extra?.thought_signatures) {
+            converted.thought_signatures = msg.extra.thought_signatures;
+        }
+
+        return converted;
     });
 }
 
