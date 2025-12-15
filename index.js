@@ -104,6 +104,9 @@ const DEFAULT_SETTINGS = {
     // Additional context to inject
     systemPromptAddition: "",  // Text to append to system prompt
 
+    // World Info Settings
+    reprocessWorldInfo: false, // Re-run World Info scan after RAG injection
+
     debugMode: false,
 };
 
@@ -447,6 +450,7 @@ async function onChatCompletionSettingsReady(data) {
         enabled: settings.enabled,
         ragProfileId: settings.ragProfileId,
         useNativeRetrieval: settings.useNativeRetrieval,
+        reprocessWorldInfo: settings.reprocessWorldInfo,
         debugMode: settings.debugMode
     });
 
@@ -499,10 +503,34 @@ async function onChatCompletionSettingsReady(data) {
         // Attempt to reconstruct messages if missing
         reconstructMessages(data);
 
+        // Extract Existing World Info (for template macros)
+        let worldInfoBefore = "";
+        let worldInfoAfter = "";
+        let worldInfoBeforeRole = "system"; // Default fallback
+        let worldInfoAfterRole = "system"; // Default fallback
+
+        if (Array.isArray(data.messages)) {
+            const wiBeforeMsg = data.messages.find(m => m.identifier === 'worldInfoBefore');
+            const wiAfterMsg = data.messages.find(m => m.identifier === 'worldInfoAfter');
+
+            if (wiBeforeMsg) {
+                worldInfoBefore = wiBeforeMsg.content || "";
+                worldInfoBeforeRole = wiBeforeMsg.role || "system";
+            }
+            if (wiAfterMsg) {
+                worldInfoAfter = wiAfterMsg.content || "";
+                worldInfoAfterRole = wiAfterMsg.role || "system";
+            }
+
+            debugLog(`Extracted existing World Info: Before=${worldInfoBefore.length} chars (${worldInfoBeforeRole}), After=${worldInfoAfter.length} chars (${worldInfoAfterRole})`);
+        }
+
         // Build the RAG query
-        // Use global chat history for template variables (handled inside replaceTemplateVars)
-        // But pass data.messages just in case (though replaceTemplateVars now prefers global chat)
-        const userPrompt = replaceTemplateVars(settings.ragUserPromptTemplate, data.messages);
+        // Pass extracted WI as extras to replaceTemplateVars so {{worldInfoBefore}} works
+        const userPrompt = replaceTemplateVars(settings.ragUserPromptTemplate, data.messages, {
+            worldInfoBefore: worldInfoBefore,
+            worldInfoAfter: worldInfoAfter
+        });
 
         // Build messages for RAG request
         const ragMessages = [
@@ -558,48 +586,158 @@ async function onChatCompletionSettingsReady(data) {
             return;
         }
 
+        // --- WORLD INFO REPROCESSING LOGIC ---
+        // If enabled, we strip old WI, re-scan the chat (which will later include RAG), and update WI strings.
+        // Actually, we need to inject RAG first, THEN re-scan.
+
+        let shouldReprocess = settings.reprocessWorldInfo;
+
+        // Verify context availability just in case
+        const context = getContext();
+        if (shouldReprocess && (!context || !context.getWorldInfoPrompt || !context.getCharacterCardFields)) {
+            console.warn(DEBUG_PREFIX, "Context functions missing, skipping World Info reprocessing");
+            shouldReprocess = false;
+        }
+
+        // 1. Inject RAG context (we do this BEFORE reprocessing so the new content is part of the scan)
+        // BUT wait, if we inject first, we need to populate '{{worldInfoBefore}}' in the injection template?
+        // Usually injection template uses {{ragResponse}}. If it uses WI macros, they might be stale until reprocessed.
+        // Let's assume injection template uses ragResponse mainly.
+
         // Format the injection using the template
+        // We use the *initial* WI strings here. If the user puts {{worldInfoBefore}} in the injection template, 
+        // they get the pre-RAG version. This is acceptable/expected behavior.
         const injectionContent = replaceTemplateVars(settings.injectionTemplate, data.messages, {
             ragResponse: ragResponse,
+            worldInfoBefore: worldInfoBefore,
+            worldInfoAfter: worldInfoAfter
         });
         debugLog("[[DEBUG]] Injection content:", injectionContent);
 
-        // Inject RAG context using configurable placement
+        // Inject RAG context
         if (Array.isArray(data.messages) && data.messages.length > 0) {
             injectRagContext(data.messages, injectionContent, settings);
-        }
 
-        // Optionally append to system prompt
-        if (settings.systemPromptAddition && Array.isArray(data.messages)) {
-            const systemMessage = data.messages.find(m => m.role === "system");
-            if (systemMessage) {
-                systemMessage.content += "\n\n" + settings.systemPromptAddition;
-            }
-        }
+            // 2. Now perform reprocessing if enabled
+            if (shouldReprocess) {
+                console.log(DEBUG_PREFIX, "Reprocessing World Info with new context...");
 
-        debugLog("RAG injection complete");
-        debugLog("[[DEBUG]] data.messages after injection:", JSON.stringify(data.messages, null, 2));
+                try {
+                    // Find indices of existing World Info messages
+                    let wiBeforeIndex = -1;
+                    let wiAfterIndex = -1;
 
-        // Optionally add retrieval tool to main model request
-        if (settings.enableMainModelTools) {
-            const mainTool = settings.useNativeRetrieval
-                ? buildRetrievalTool()
-                : buildFunctionTool();
+                    for (let i = 0; i < data.messages.length; i++) {
+                        if (data.messages[i].identifier === 'worldInfoBefore') wiBeforeIndex = i;
+                        if (data.messages[i].identifier === 'worldInfoAfter') wiAfterIndex = i;
+                    }
 
-            if (mainTool) {
-                data.tools = data.tools || [];
-                data.tools.push(mainTool);
+                    // Prepare for scan
+                    const globalScanData = context.getCharacterCardFields();
+                    const scanData = {
+                        ...globalScanData,
+                        personaDescription: globalScanData.persona,
+                        characterDescription: globalScanData.description,
+                        characterPersonality: globalScanData.personality,
+                        characterDepthPrompt: globalScanData.charDepthPrompt,
+                        trigger: 'normal',
+                    };
 
-                // Set tool_choice if not "auto" (auto is typically the default)
-                if (settings.mainModelToolChoice && settings.mainModelToolChoice !== "auto") {
-                    data.tool_choice = settings.mainModelToolChoice;
+                    // Extract content strings for the scan
+                    // IMPORTANT: Exclude existing WI from the scan to prevent self-triggering loops
+                    const chatStrings = data.messages
+                        .filter(m => m.identifier !== 'worldInfoBefore' && m.identifier !== 'worldInfoAfter')
+                        .map(m => {
+                            if (typeof m.content === 'string') return m.content;
+                            if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
+                            return '';
+                        });
+
+                    // Get max context
+                    const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
+
+                    // Re-generate WI
+                    const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, false, scanData);
+
+                    // Update our local strings
+                    worldInfoBefore = wiResult.worldInfoBefore || "";
+                    worldInfoAfter = wiResult.worldInfoAfter || "";
+
+                    debugLog(`Regenerated World Info: Before=${worldInfoBefore.length}, After=${worldInfoAfter.length}`);
+
+                    // Update data.messages IN-PLACE to preserve order
+
+                    // Update or Insert 'worldInfoAfter'
+                    if (wiAfterIndex !== -1) {
+                        if (worldInfoAfter) {
+                            data.messages[wiAfterIndex].content = worldInfoAfter;
+                            data.messages[wiAfterIndex].role = worldInfoAfterRole; // Use retained role
+                        } else {
+                            data.messages.splice(wiAfterIndex, 1);
+                            // Adjust beforeIndex if it was after the spliced element (unlikely for 'Before', but good practice)
+                            if (wiBeforeIndex > wiAfterIndex) wiBeforeIndex--;
+                        }
+                    } else if (worldInfoAfter) {
+                        data.messages.push({
+                            role: worldInfoAfterRole,
+                            content: worldInfoAfter,
+                            identifier: 'worldInfoAfter'
+                        });
+                    }
+
+                    // Update or Insert 'worldInfoBefore'
+                    if (wiBeforeIndex !== -1) {
+                        if (worldInfoBefore) {
+                            data.messages[wiBeforeIndex].content = worldInfoBefore;
+                            data.messages[wiBeforeIndex].role = worldInfoBeforeRole; // Use retained role
+                        } else {
+                            data.messages.splice(wiBeforeIndex, 1);
+                        }
+                    } else if (worldInfoBefore) {
+                        data.messages.unshift({
+                            role: worldInfoBeforeRole,
+                            content: worldInfoBefore,
+                            identifier: 'worldInfoBefore'
+                        });
+                    }
+
+                } catch (e) {
+                    console.error(DEBUG_PREFIX, "Error reprocessing World Info:", e);
                 }
-
-                debugLog("Added retrieval tool to main model request with tool_choice:", settings.mainModelToolChoice);
             }
+
+            // Optionally append to system prompt
+            if (settings.systemPromptAddition && Array.isArray(data.messages)) {
+                const systemMessage = data.messages.find(m => m.role === "system");
+                if (systemMessage) {
+                    systemMessage.content += "\n\n" + settings.systemPromptAddition;
+                }
+            }
+
+            debugLog("RAG injection complete");
+            debugLog("[[DEBUG]] data.messages after injection:", JSON.stringify(data.messages, null, 2));
+
+            // Optionally add retrieval tool to main model request
+            if (settings.enableMainModelTools) {
+                const mainTool = settings.useNativeRetrieval
+                    ? buildRetrievalTool()
+                    : buildFunctionTool();
+
+                if (mainTool) {
+                    data.tools = data.tools || [];
+                    data.tools.push(mainTool);
+
+                    // Set tool_choice if not "auto" (auto is typically the default)
+                    if (settings.mainModelToolChoice && settings.mainModelToolChoice !== "auto") {
+                        data.tool_choice = settings.mainModelToolChoice;
+                    }
+
+                    debugLog("Added retrieval tool to main model request with tool_choice:", settings.mainModelToolChoice);
+                }
+            }
+
+
         }
-
-
     } catch (error) {
         console.error(DEBUG_PREFIX, "RAG request failed:", error);
         if (error.cause) {
@@ -609,6 +747,7 @@ async function onChatCompletionSettingsReady(data) {
         isProcessingRag = false;
     }
 }
+
 
 /**
  * Load extension settings into the UI
@@ -637,6 +776,7 @@ function loadSettingsUI() {
     $("#rag_enable_main_model_tools").prop("checked", settings.enableMainModelTools);
     $("#rag_main_model_tool_choice").val(settings.mainModelToolChoice);
     $("#rag_system_prompt_addition").val(settings.systemPromptAddition);
+    $("#rag_reprocess_world_info").prop("checked", settings.reprocessWorldInfo);
     $("#rag_debug_mode").prop("checked", settings.debugMode);
 
     // Populate provider dropdown
@@ -701,18 +841,19 @@ function saveSettings() {
     settings.retrievalProvider = $("#rag_retrieval_provider").val();
     settings.customRetrievalJson = $("#rag_custom_retrieval_json").val();
     settings.toolChoice = $("#rag_tool_choice").val();
-    settings.maxResults = parseInt($("#rag_max_results").val()) || 5;
-    settings.maxTokens = parseInt($("#rag_max_tokens").val()) || 1000;
+    settings.maxResults = parseInt(String($("#rag_max_results").val())) || 5;
+    settings.maxTokens = parseInt(String($("#rag_max_tokens").val())) || 1000;
     settings.ragSystemPrompt = $("#rag_system_prompt").val();
     settings.ragUserPromptTemplate = $("#rag_user_prompt_template").val();
     settings.injectionTemplate = $("#rag_injection_template").val();
     settings.injectionRole = $("#rag_injection_role").val();
     settings.injectionPosition = $("#rag_injection_position").val();
-    settings.injectionDepth = parseInt($("#rag_injection_depth").val()) || -1;
+    settings.injectionDepth = parseInt(String($("#rag_injection_depth").val())) || -1;
     settings.injectionMerge = $("#rag_injection_merge").prop("checked");
     settings.enableMainModelTools = $("#rag_enable_main_model_tools").prop("checked");
     settings.mainModelToolChoice = $("#rag_main_model_tool_choice").val();
     settings.systemPromptAddition = $("#rag_system_prompt_addition").val();
+    settings.reprocessWorldInfo = $("#rag_reprocess_world_info").prop("checked");
     settings.debugMode = $("#rag_debug_mode").prop("checked");
 
     saveSettingsDebounced();

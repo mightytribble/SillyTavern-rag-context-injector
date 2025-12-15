@@ -28,6 +28,7 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 - Supports linking to a specific Connection Profile, so extension can be enabled by changing profiles.
 - Allows for custom system prompts and RAG queries with familiar macros you know and love.
 - Optionally allow the main model to also query the data store to build on the RAG model's results.
+- Optionally allows the augmented prompt (with RAG results injected) to be re-scanned for relevant World Info entries.
 
 ## Installation
 
@@ -73,21 +74,24 @@ The scenario in which this conversation is occurring is (this might be blank):
 {{scenario}}
 </scenario>
 
-You MUST use the provided tool to query {{char}}'s memories in the knowledge base. Write your reply as a series of memory statements recounting your findings, e.g. "{{char}} remembers X, Y and Z".
+You MUST use the provided tools to query {{char}}'s memories in the knowledge base. Think step-by-step about what questions you could ask the tool to retrieve more information. Follow this method:
 
-Only include memories retrieved from the knowledge base with the tool. Do NOT include memories that just restate information provided in <conversation> or <scenario>. 
+1. Generate a list of AT LEAST 3 questions that explore the people, topics and background details of the <conversation> from different angles.
+2. Use these questions to query the knowledge base.
+3. Analyze and synthesize a final reply.
 
-Remember, you MUST use the provided tool to find more information. Think step-by-step about what questions you could ask the tool to retrieve more information. Be verbose and thorough in your investigation. Consider asking:
-- what does {{char}} know about the other people present?
-- what does {{char}} know about their current location?
-- what does {{char}} know about what has happened recently?
+Be verbose and thorough in your investigation. 
 
-Your final reply must ONLY be a series of memory statements.  Another assistant will use this information to construct a final reply.
+Write your reply as a series of memory statements recounting your findings, e.g. "{{char}} remembers X, Y and Z".
+
+Only include memories retrieved from the knowledge base with the tool. Do NOT include memories that just restate information provided in <conversation>. 
+
+Remember, you MUST use the provided tool to find more information. Your final reply must ONLY be a series of detailed, verbose memory statements that provide additional context and supplementary information to the contents of <conversation>.  Another assistant will use this information to construct a final reply.
 ```
 
 ### Supported Macros
 
-The RAG Query Template supports the following macros:
+The RAG Query Template supports the following macros to allow you to customize the context given to the RAG query model:
 - {{lastMessage}} - last message in chat history.
 - {{lastNMessages:5}} - last _N_ messages in chat history.
 - {{messages:X:Y}} - A range of messages in chat history, starting at 0 and going back. {{messages:-10:-2}} will get the last 10 messages, not including the last message. {{messages:-10:-1}} will get the last 10 messages, including the last message. Good if you use a prefill or post-history message and want to *not* send that to the RAG model!
@@ -98,6 +102,8 @@ The RAG Query Template supports the following macros:
 - {{description}} - the description of the AI's character from the character card.
 - {{personality}} - the personality of the AI's character from the character card.
 - {{scenario}} - the scenario block from the character card.
+- {{worldInfoBefore}} - Entries from the world Info block inserted before the character block in the prompt.
+- {{worldInfoAfter}} - Entries from the world Info block inserted after the character block in the prompt.
 
 
 ## Sample System Prompt Template
@@ -105,7 +111,7 @@ The RAG Query Template supports the following macros:
 The extension defines its own system prompt (so whatever you have set up in your chat completion preset is ignored). Here's an example:
 
 ```
-You are a context retrieval assistant. You MUST use your available tools to search for and retrieve information relevant to the query. Your job is to prepare information that will be used by another assistant to create a final response.
+You are a context retrieval assistant. You MUST use your available tools to search for and retrieve information relevant to the query. Your job is to retrieve and collate information that will be used by another assistant to create a final response.
 ```
 
 ## Notes
@@ -114,7 +120,7 @@ The extension supports thinking (set it in your Chat Completion preset, setting 
 
 The extension supports 'forcing' tool use via the `Tool Choice: Required` option. Since this extension only configures one tool this effectively forces the model to use the retrieval tool. You should probably set this, as it's the whole point of the extension! This should work for both Gemini models and OAI-compatible tool calling.
 
-The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
+The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console or web developer console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
 
 ```
 I've conducted an initial search of the knowledge base for relevant memories. I've included anything I've found below (if it's blank, I didn't find anything relevant):
@@ -123,7 +129,7 @@ I've conducted an initial search of the knowledge base for relevant memories. I'
 </memories>
 ```
 
-A real power move is to enable the `Enable Main Model Tool Access` option. This allows the RAG model to perform an initial search, and then gives the main model the option to perform an additional set of searches informed by the RAG model's findings: two bites from the apple! If you do this remember to adjust your main Chat Completion preset to prompt it appropriately. With Gemini Pro 3.0 I've found that I really need to yell at it in the final user message, calling it lazy, to get it to use the tool consistently.
+I phrased it as "I've conducted an **initial** search" because a real power move is to enable the `Enable Main Model Tool Access` option. This allows the RAG model to perform an initial search, and then gives the main model the option to perform an additional set of searches informed by the RAG model's findings: two bites from the apple! Or in other words, you get two different models performing essentially agentic RAG against your custom vector store and synthesizing the results. If you do this remember to adjust your main Chat Completion preset to prompt it appropriately. With Gemini Pro 3.0 I've found that I really need to yell at it in the final user message, calling it lazy, to get it to use the tool consistently.
 
 ## Injection Placement Configuration
 
@@ -136,7 +142,7 @@ Control where and how RAG context is injected:
 | **Injection Depth** | 0, -1, -2, ... | Depth from end (only when Position = depth) |
 | **Merge with Existing** | checkbox | Append to existing message if same role |
 | **Enable Main Model Tool Access** | checkbox | Also give the main model the retrieval tool |
-| **Main Model Tool Choice** | `auto`, `required`, `none` | How the main model should use the tool |
+| **Main Model Tool Choice** | `auto`, `required`, `none` | Can the main model use tools? |
 
 ### Position Details
 - **Start of Chat**: Inserts after system messages, before first user/assistant message
@@ -153,7 +159,11 @@ Remember also if you've set your main Chat Completion Profile to 'squash system 
 
 ### System Prompt Addition
 
-The **System Prompt Addition** field lets you append extra text to the main request's system prompt. This is useful for adding instructions that tell the main model how to use the RAG context or the retrieval tool (if enabled).
+The **System Prompt Addition** field lets you append extra text to the main request's system prompt. This may be useful for adding instructions that tell the main model how to use the RAG context or the retrieval tool (if enabled).
+
+### Reprocess World Info
+
+The **Reprocess World Info** option allows the augmented prompt (with RAG results injected) to be re-scanned for relevant World Info entries. This is particularly useful if the RAG queries uncover new information that is relevant but wouldn't have been triggered by the original, pre-RAG query prompt. By default this will only match on keywords. If you want to use Vector Storage as well, you'll need to activate `Include in World Info Scanning` and increase the `Query Messages` value in the Vector Storage settings to make sure the RAG Injected content is processed and can trigger World Info entries.
 
 ### Profile Filter
 
