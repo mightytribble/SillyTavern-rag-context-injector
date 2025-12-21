@@ -292,8 +292,10 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
         fullHistory: formatMessagesForContext(messages.filter(m => m.role !== "system")),
         characterName: characterName,
         char: characterName,
+        Char: characterName, // Capitalized alias
         userName: userName,
         user: userName,
+        User: userName, // Capitalized alias
         description: description,
         personality: personality,
         scenario: scenario,
@@ -504,26 +506,62 @@ async function onChatCompletionSettingsReady(data) {
         reconstructMessages(data);
 
         // Extract Existing World Info (for template macros)
+        // World Info is NOT stored with identifier fields in data.messages.
+        // Instead, we need to call getWorldInfoPrompt() directly to get the WI strings.
         let worldInfoBefore = "";
         let worldInfoAfter = "";
-        let worldInfoBeforeRole = "system"; // Default fallback
-        let worldInfoAfterRole = "system"; // Default fallback
 
-        if (Array.isArray(data.messages)) {
-            const wiBeforeMsg = data.messages.find(m => m.identifier === 'worldInfoBefore');
-            const wiAfterMsg = data.messages.find(m => m.identifier === 'worldInfoAfter');
+        try {
+            const context = getContext();
+            if (context && context.getWorldInfoPrompt && context.getCharacterCardFields) {
+                // Prepare scan data
+                const globalScanData = context.getCharacterCardFields();
+                const scanData = {
+                    ...globalScanData,
+                    personaDescription: globalScanData.persona,
+                    characterDescription: globalScanData.description,
+                    characterPersonality: globalScanData.personality,
+                    characterDepthPrompt: globalScanData.charDepthPrompt,
+                    trigger: 'normal',
+                };
 
-            if (wiBeforeMsg) {
-                worldInfoBefore = wiBeforeMsg.content || "";
-                worldInfoBeforeRole = wiBeforeMsg.role || "system";
+                // Extract content strings for the scan
+                const chatStrings = data.messages
+                    .map(m => {
+                        if (typeof m.content === 'string') return m.content;
+                        if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
+                        return '';
+                    });
+
+                // Get max context
+                const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
+
+                // Get World Info - use isDryRun=true to avoid emitting events
+                const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, true, scanData);
+
+                worldInfoBefore = wiResult.worldInfoBefore || "";
+                worldInfoAfter = wiResult.worldInfoAfter || "";
+
+                debugLog(`Retrieved World Info: Before=${worldInfoBefore.length} chars, After=${worldInfoAfter.length} chars`);
+            } else {
+                console.warn(DEBUG_PREFIX, "Context or getWorldInfoPrompt not available");
             }
-            if (wiAfterMsg) {
-                worldInfoAfter = wiAfterMsg.content || "";
-                worldInfoAfterRole = wiAfterMsg.role || "system";
-            }
-
-            debugLog(`Extracted existing World Info: Before=${worldInfoBefore.length} chars (${worldInfoBeforeRole}), After=${worldInfoAfter.length} chars (${worldInfoAfterRole})`);
+        } catch (error) {
+            console.error(DEBUG_PREFIX, "Error retrieving World Info:", error);
         }
+
+        // [[ENHANCED DEBUG]] Log all message identifiers to see what's actually in the request
+        debugLog("[[DEBUG]] Message identifiers in data.messages:",
+            data.messages.map(m => ({
+                identifier: m.identifier || 'NO_IDENTIFIER',
+                role: m.role,
+                contentLength: typeof m.content === 'string' ? m.content.length :
+                    Array.isArray(m.content) ? m.content.length + ' items' : 'unknown'
+            }))
+        );
+        debugLog("[[DEBUG]] World Info extracted - Before:", worldInfoBefore.substring(0, 300) + (worldInfoBefore.length > 300 ? '...' : ''), `(total: ${worldInfoBefore.length} chars)`);
+        debugLog("[[DEBUG]] World Info extracted - After:", worldInfoAfter.substring(0, 300) + (worldInfoAfter.length > 300 ? '...' : ''), `(total: ${worldInfoAfter.length} chars)`);
+        debugLog("[[DEBUG]] RAG User Prompt Template:", settings.ragUserPromptTemplate);
 
         // Build the RAG query
         // Pass extracted WI as extras to replaceTemplateVars so {{worldInfoBefore}} works
@@ -531,6 +569,10 @@ async function onChatCompletionSettingsReady(data) {
             worldInfoBefore: worldInfoBefore,
             worldInfoAfter: worldInfoAfter
         });
+
+        // [[ENHANCED DEBUG]] Log the final query to verify macro replacement
+        debugLog("[[DEBUG]] Final RAG userPrompt (first 500 chars):", userPrompt.substring(0, 500) + (userPrompt.length > 500 ? '...' : ''));
+        debugLog("[[DEBUG]] Full userPrompt length:", userPrompt.length);
 
         // Build messages for RAG request
         const ragMessages = [
