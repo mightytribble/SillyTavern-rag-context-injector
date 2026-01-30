@@ -2,7 +2,7 @@
 
 A SillyTavern extension that enables generative vector search via tool calling using a secondary model.
 
-**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) should end up in the next release (1.14.1+) 
+**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) should end up in the next release (1.14.1+)
 
 ## Overview
 
@@ -18,7 +18,7 @@ While the primary use case is making those chat logs work better, it's not limit
 
 ## Yes, okay, but Why ~~Male Models~~ Google Vertex AI Search?
 
-It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rolling your own Weaviate or Pinecone solution) and the Gemini file_search API. It's not too expensive (10GB free storage, 10K free requests/month), and it's easy to use and manage - just upload chatlogs to a GCP Storage Bucket or even a Google Drive folder and tell AI Search to index it. And if you need to process image-based PDFs, you can do that easily! (Yes this bit you pay for, but it's not too expensive and it works surprisingly well!). 
+It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rolling your own Weaviate or Pinecone solution) and the Gemini file_search API. It's not too expensive (10GB free storage, 10K free requests/month), and it's easy to use and manage - just upload chatlogs to a GCP Storage Bucket or even a Google Drive folder and tell AI Search to index it. And if you need to process image-based PDFs, you can do that easily! (Yes this bit you pay for, but it's not too expensive and it works surprisingly well!).
 
 ## Features
 
@@ -32,7 +32,7 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 
 ## Installation
 
-### Using the SillyTavern Extension Manager 
+### Using the SillyTavern Extension Manager
 
 1. Open SillyTavern
 2. Go to the Extensions tab
@@ -42,17 +42,17 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 6. Restart SillyTavern
 
 ### Manual Installation
+
 1. Download the extension from the [Releases](https://github.com/mightytribble/SillyTavern-rag-context-injector/releases) page.
 2. Extract the contents of the downloaded zip file.
 3. Copy the extracted folder to the `scripts/extensions/third-party` directory of your SillyTavern installation.
 4. Restart SillyTavern.
 
-
 ## Setup
 
 1. Get Ye A Datastore! Instructions not included but you'll need a datastore with content in it, and a model that can use a tool that connects to that datastore. This is not beginner-friendly! This extension was written primarily to support Google Vertex AI Search (with Gemini Pro 2.5 or 3.0 as the main model and Flash 2.5 Thinking as the RAG model), but it should work with any tool-using model. [Here's Google's documentation for creating a data store using content from a GCP Storage Bucket](https://docs.cloud.google.com/generative-ai-app-builder/docs/create-data-store-es#cloud-storage). If you just want to enable Google Vertex AI Search in your main model, you can use the much simpler [Google Vertex AI Search](https://github.com/mightytribble/SillyTavern-vertex-ai-search). But you'll still need a data store to point it at.
 2. ~~Profit!~~ Create a connection profile for the RAG processing model you want to use. Call it something useful like "Vertex AI Search" or "RAG Profile".
-3. Create a Chat Completion Preset for your new connection profile. Turn on thinking, set a budget (I do max, YOLO), turn streaming off, adjust temp etc to taste. Save it, make sure it's associated with your new connection profile. 
+3. Create a Chat Completion Preset for your new connection profile. Turn on thinking, set a budget (I do max, YOLO), turn streaming off, adjust temp etc to taste. Save it, make sure it's associated with your new connection profile.
 4. Remember to set your connection profile and Chat Completion Preset back to your main model after you're done! Otherwise you'll be sad.
 5. Configure the extension in the SillyTavern settings, including customizing your RAG Query Template.
 6. Profit!
@@ -61,7 +61,7 @@ It's a happy middle between the complexity of roll-your-own DIY RAG (e.g. rollin
 
 A template speaks a thousand tokens.
 
-```
+```txt
 Your task is to search {{char}}'s memories for relevant context for this conversation:
 
 <conversation>
@@ -92,9 +92,10 @@ Remember, you MUST use the provided tool to find more information. Your final re
 ### Supported Macros
 
 The RAG Query Template supports the following macros to allow you to customize the context given to the RAG query model:
+
 - {{lastMessage}} - last message in chat history.
 - {{lastNMessages:5}} - last _N_ messages in chat history.
-- {{messages:X:Y}} - A range of messages in chat history, starting at 0 and going back. {{messages:-10:-2}} will get the last 10 messages, not including the last message. {{messages:-10:-1}} will get the last 10 messages, including the last message. Good if you use a prefill or post-history message and want to *not* send that to the RAG model!
+- {{messages:X:Y}} - A range of messages in chat history, starting at 0 and going back. {{messages:-10:-2}} will get the last 10 messages, not including the last message. {{messages:-10:-1}} will get the last 10 messages, including the last message. Good if you use a prefill or post-history message and want to _not_ send that to the RAG model!
 - {{recentHistory}} - last 10 messages in chat history.
 - {{fullHistory}} - full chat history.
 - {{char}} - the name of the AI's character (also {{characterName}} for backward compatibility).
@@ -105,12 +106,11 @@ The RAG Query Template supports the following macros to allow you to customize t
 - {{worldInfoBefore}} - Entries from the world Info block inserted before the character block in the prompt.
 - {{worldInfoAfter}} - Entries from the world Info block inserted after the character block in the prompt.
 
-
 ## Sample System Prompt Template
 
 The extension defines its own system prompt (so whatever you have set up in your chat completion preset is ignored). Here's an example:
 
-```
+```txt
 You are a context retrieval assistant. You MUST use your available tools to search for and retrieve information relevant to the query. Your job is to retrieve and collate information that will be used by another assistant to create a final response.
 ```
 
@@ -122,7 +122,7 @@ The extension supports 'forcing' tool use via the `Tool Choice: Required` option
 
 The extension injects the RAG context into the chat with configurable placement options (see Injection Placement Configuration below). The results of the RAG query won't show up in Prompt Inspector or linger in chat history, but if you check the raw requests in the ST binary console or web developer console you'll see it there. You can customize the contents of this message by editing the `Context Injection Template`. I use something like this:
 
-```
+```txt
 I've conducted an initial search of the knowledge base for relevant memories. I've included anything I've found below (if it's blank, I didn't find anything relevant):
 <memories>
 {{ragResponse}}
@@ -136,7 +136,7 @@ I phrased it as "I've conducted an **initial** search" because a real power move
 Control where and how RAG context is injected:
 
 | Setting | Options | Description |
-|---------|---------|-------------|
+| ------- | ------- | ----------- |
 | **Injection Role** | `system`, `assistant`, `user` | Role of the injected message |
 | **Injection Position** | `start`, `depth` | Where to inject |
 | **Injection Depth** | 0, -1, -2, ... | Depth from end (only when Position = depth) |
@@ -145,15 +145,17 @@ Control where and how RAG context is injected:
 | **Main Model Tool Choice** | `auto`, `required`, `none` | Can the main model use tools? |
 
 ### Position Details
+
 - **Start of Chat**: Inserts after system messages, before first user/assistant message
 - **Depth from End**: `0` = append to end, `-1` = before last message, `-2` = before second-to-last, etc.
 
 ### Default Behavior
+
 Assistant message, depth -1, no merge.
 
 Remember, if you use a 'prefill' that counts as a message (the last message, position 0) in the chat for purposes of placing the injection.
 
-Remember also if you've set your main Chat Completion Profile to 'squash system messages', the RAG context will be merged into the message at its assigned depth if it's a system or assistant role. 
+Remember also if you've set your main Chat Completion Profile to 'squash system messages', the RAG context will be merged into the message at its assigned depth if it's a system or assistant role.
 
 ## Additional Options
 
@@ -173,7 +175,7 @@ The **Only run RAG for specific profile** option restricts RAG processing to onl
 
 I tend to use a 'framing' Chat Completion preset that puts the entire chat history before some Assistant messages that frame the context injection. My Chat Completion presets look something like this (not the actual prompt, but illustrating the structure and content):
 
-```
+```txt
 System:
 <system prompt stuff>
 - preamble ("We're playing a game", "You're the GM", whatever)
