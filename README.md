@@ -2,7 +2,7 @@
 
 A SillyTavern extension that enables generative vector search via tool calling using a secondary model.
 
-**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) should end up in the next release (1.14.1+)
+**WARNING**: This is a work in progress. It seems to work as expected for my Google Vertex AI use case against the current Staging branch of SillyTavern. The tweaks it needs to work (tool_choice and non-function tool calling) REQUIRE SillyTavern (1.15+).
 
 ## Overview
 
