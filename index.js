@@ -575,8 +575,14 @@ async function onChatCompletionSettingsReady(data) {
         debugLog("[[DEBUG]] Full userPrompt length:", userPrompt.length);
 
         // Build messages for RAG request
+        // Process system prompt through replaceTemplateVars to support macros
+        const systemPrompt = replaceTemplateVars(settings.ragSystemPrompt, data.messages, {
+            worldInfoBefore: worldInfoBefore,
+            worldInfoAfter: worldInfoAfter
+        });
+
         const ragMessages = [
-            { role: "system", content: settings.ragSystemPrompt },
+            { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
         ];
         console.log(DEBUG_PREFIX, "RAG messages built:", ragMessages.length);
