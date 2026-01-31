@@ -680,6 +680,10 @@ async function onChatCompletionSettingsReady(data) {
                         if (data.messages[i].identifier === 'worldInfoAfter') wiAfterIndex = i;
                     }
 
+                    // Capture the existing roles before we modify anything (default to 'system' if not found)
+                    const worldInfoBeforeRole = wiBeforeIndex !== -1 ? data.messages[wiBeforeIndex].role : 'system';
+                    const worldInfoAfterRole = wiAfterIndex !== -1 ? data.messages[wiAfterIndex].role : 'system';
+
                     // Prepare for scan
                     const globalScanData = context.getCharacterCardFields();
                     const scanData = {
