@@ -16,6 +16,19 @@ const EXTENSION_NAME = "rag-context-injector";
 const EXTENSION_FOLDER = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const DEBUG_PREFIX = "[RAG Injector]";
 
+// Message Roles
+const ROLES = {
+    USER: "user",
+    ASSISTANT: "assistant",
+    SYSTEM: "system",
+};
+
+// World Info Identifiers
+const WORLD_INFO = {
+    BEFORE: "worldInfoBefore",
+    AFTER: "worldInfoAfter",
+};
+
 // Supported retrieval providers
 // Tool format must include 'type' property - backend extracts via tool[tool.type]
 const RETRIEVAL_PROVIDERS = {
@@ -111,6 +124,38 @@ const DEFAULT_SETTINGS = {
 };
 
 /**
+ * UI element bindings configuration
+ * Maps DOM element IDs to settings keys with type information
+ * Types: 'checkbox' (boolean), 'text' (string), 'number' (integer), 'select' (string)
+ * Special handlers are needed for elements with side effects (marked with onChangeExtra)
+ */
+const UI_BINDINGS = [
+    { id: 'rag_enabled', key: 'enabled', type: 'checkbox' },
+    { id: 'rag_filter_by_profile', key: 'filterByProfile', type: 'checkbox' },
+    { id: 'rag_datastore_id', key: 'datastoreId', type: 'text' },
+    { id: 'rag_tool_name', key: 'toolName', type: 'text' },
+    { id: 'rag_tool_description', key: 'toolDescription', type: 'text' },
+    { id: 'rag_use_native_retrieval', key: 'useNativeRetrieval', type: 'checkbox', onChangeExtra: 'updateToolTypeVisibility' },
+    { id: 'rag_retrieval_provider', key: 'retrievalProvider', type: 'select', onChangeExtra: 'updateToolTypeVisibility' },
+    { id: 'rag_custom_retrieval_json', key: 'customRetrievalJson', type: 'text' },
+    { id: 'rag_tool_choice', key: 'toolChoice', type: 'select' },
+    { id: 'rag_max_results', key: 'maxResults', type: 'number', default: 5 },
+    { id: 'rag_max_tokens', key: 'maxTokens', type: 'number', default: 1000 },
+    { id: 'rag_system_prompt', key: 'ragSystemPrompt', type: 'text' },
+    { id: 'rag_user_prompt_template', key: 'ragUserPromptTemplate', type: 'text' },
+    { id: 'rag_injection_template', key: 'injectionTemplate', type: 'text' },
+    { id: 'rag_injection_role', key: 'injectionRole', type: 'select' },
+    { id: 'rag_injection_position', key: 'injectionPosition', type: 'select', onChangeExtra: 'updateInjectionPositionVisibility' },
+    { id: 'rag_injection_depth', key: 'injectionDepth', type: 'number', default: -1 },
+    { id: 'rag_injection_merge', key: 'injectionMerge', type: 'checkbox' },
+    { id: 'rag_enable_main_model_tools', key: 'enableMainModelTools', type: 'checkbox' },
+    { id: 'rag_main_model_tool_choice', key: 'mainModelToolChoice', type: 'select' },
+    { id: 'rag_system_prompt_addition', key: 'systemPromptAddition', type: 'text' },
+    { id: 'rag_reprocess_world_info', key: 'reprocessWorldInfo', type: 'checkbox' },
+    { id: 'rag_debug_mode', key: 'debugMode', type: 'checkbox' },
+];
+
+/**
  * Get current settings with defaults
  * @returns {typeof DEFAULT_SETTINGS}
  */
@@ -184,7 +229,7 @@ let isProcessingRag = false;
  */
 function getLastUserMessage(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
+        if (messages[i].role === ROLES.USER) {
             return messages[i].content || "";
         }
     }
@@ -198,7 +243,7 @@ function getLastUserMessage(messages) {
  * @returns {string} - Formatted messages
  */
 function getLastNMessages(messages, n) {
-    const chatMessages = messages.filter(m => m.role !== "system");
+    const chatMessages = messages.filter(m => m.role !== ROLES.SYSTEM);
     const lastN = chatMessages.slice(-n);
     return formatMessagesForContext(lastN);
 }
@@ -220,7 +265,7 @@ function getRecentHistory(messages, count = 10) {
  */
 function formatMessagesForContext(messages) {
     return messages.map(m => {
-        const role = m.role === "user" ? "User" : "Assistant";
+        const role = m.role === ROLES.USER ? "User" : "Assistant";
         const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
         return `${role}: ${content}`;
     }).join("\n\n");
@@ -235,11 +280,11 @@ function convertSillyTavernToOpenAI(chatMessages) {
     if (!Array.isArray(chatMessages)) return [];
 
     return chatMessages.map(msg => {
-        let role = "assistant";
+        let role = ROLES.ASSISTANT;
         if (msg.is_user) {
-            role = "user";
+            role = ROLES.USER;
         } else if (msg.is_system) {
-            role = "system";
+            role = ROLES.SYSTEM;
         }
 
         const converted = {
@@ -289,7 +334,7 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     const baseVars = {
         lastMessage: getLastUserMessage(messages),
         recentHistory: getRecentHistory(messages, 10),
-        fullHistory: formatMessagesForContext(messages.filter(m => m.role !== "system")),
+        fullHistory: formatMessagesForContext(messages.filter(m => m.role !== ROLES.SYSTEM)),
         characterName: characterName,
         char: characterName,
         Char: characterName, // Capitalized alias
@@ -321,7 +366,7 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     result = result.replace(slicePattern, (match, start, end) => {
         let startIdx = parseInt(start, 10);
         const endIdx = end ? parseInt(end, 10) : undefined;
-        const chatMessages = messages.filter(m => m.role !== "system");
+        const chatMessages = messages.filter(m => m.role !== ROLES.SYSTEM);
 
         // Graceful handling for negative indices that exceed length
         // e.g. slice(-10) on array of length 8 should be slice(0)
@@ -356,7 +401,7 @@ function reconstructMessages(data) {
     if (globalChat.length === 0) return;
 
     // Count non-system messages in data.messages
-    const nonSystemCount = data.messages.filter(m => m.role !== "system").length;
+    const nonSystemCount = data.messages.filter(m => m.role !== ROLES.SYSTEM).length;
 
     // If we have significantly fewer messages than global chat, something is wrong
     // (Allow some difference for context shifting/token limits, but 0 vs 8 is a bug)
@@ -367,7 +412,7 @@ function reconstructMessages(data) {
 
         // Append history to existing messages (which are likely system prompts)
         // We filter out system messages from history to avoid duplication if they are already in data.messages
-        const historyToAdd = convertedHistory.filter(m => m.role !== "system");
+        const historyToAdd = convertedHistory.filter(m => m.role !== ROLES.SYSTEM);
 
         data.messages.push(...historyToAdd);
 
@@ -390,7 +435,7 @@ function injectRagContext(messages, content, settings) {
     // Find "start of chat" = index of first non-system message
     function findStartIndex() {
         for (let i = 0; i < messages.length; i++) {
-            if (messages[i].role !== "system") {
+            if (messages[i].role !== ROLES.SYSTEM) {
                 return i;
             }
         }
@@ -582,8 +627,8 @@ async function onChatCompletionSettingsReady(data) {
         });
 
         const ragMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
+            { role: ROLES.SYSTEM, content: systemPrompt },
+            { role: ROLES.USER, content: userPrompt }
         ];
         console.log(DEBUG_PREFIX, "RAG messages built:", ragMessages.length);
         debugLog("[[DEBUG]] Sending ragMessages:", JSON.stringify(ragMessages, null, 2));
@@ -676,13 +721,13 @@ async function onChatCompletionSettingsReady(data) {
                     let wiAfterIndex = -1;
 
                     for (let i = 0; i < data.messages.length; i++) {
-                        if (data.messages[i].identifier === 'worldInfoBefore') wiBeforeIndex = i;
-                        if (data.messages[i].identifier === 'worldInfoAfter') wiAfterIndex = i;
+                        if (data.messages[i].identifier === WORLD_INFO.BEFORE) wiBeforeIndex = i;
+                        if (data.messages[i].identifier === WORLD_INFO.AFTER) wiAfterIndex = i;
                     }
 
-                    // Capture the existing roles before we modify anything (default to 'system' if not found)
-                    const worldInfoBeforeRole = wiBeforeIndex !== -1 ? data.messages[wiBeforeIndex].role : 'system';
-                    const worldInfoAfterRole = wiAfterIndex !== -1 ? data.messages[wiAfterIndex].role : 'system';
+                    // Capture the existing roles before we modify anything (default to ROLES.SYSTEM if not found)
+                    const worldInfoBeforeRole = wiBeforeIndex !== -1 ? data.messages[wiBeforeIndex].role : ROLES.SYSTEM;
+                    const worldInfoAfterRole = wiAfterIndex !== -1 ? data.messages[wiAfterIndex].role : ROLES.SYSTEM;
 
                     // Prepare for scan
                     const globalScanData = context.getCharacterCardFields();
@@ -698,7 +743,7 @@ async function onChatCompletionSettingsReady(data) {
                     // Extract content strings for the scan
                     // IMPORTANT: Exclude existing WI from the scan to prevent self-triggering loops
                     const chatStrings = data.messages
-                        .filter(m => m.identifier !== 'worldInfoBefore' && m.identifier !== 'worldInfoAfter')
+                        .filter(m => m.identifier !== WORLD_INFO.BEFORE && m.identifier !== WORLD_INFO.AFTER)
                         .map(m => {
                             if (typeof m.content === 'string') return m.content;
                             if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
@@ -733,7 +778,7 @@ async function onChatCompletionSettingsReady(data) {
                         data.messages.push({
                             role: worldInfoAfterRole,
                             content: worldInfoAfter,
-                            identifier: 'worldInfoAfter'
+                            identifier: WORLD_INFO.AFTER
                         });
                     }
 
@@ -749,7 +794,7 @@ async function onChatCompletionSettingsReady(data) {
                         data.messages.unshift({
                             role: worldInfoBeforeRole,
                             content: worldInfoBefore,
-                            identifier: 'worldInfoBefore'
+                            identifier: WORLD_INFO.BEFORE
                         });
                     }
 
@@ -760,7 +805,7 @@ async function onChatCompletionSettingsReady(data) {
 
             // Optionally append to system prompt
             if (settings.systemPromptAddition && Array.isArray(data.messages)) {
-                const systemMessage = data.messages.find(m => m.role === "system");
+                const systemMessage = data.messages.find(m => m.role === ROLES.SYSTEM);
                 if (systemMessage) {
                     systemMessage.content += "\n\n" + settings.systemPromptAddition;
                 }
@@ -807,29 +852,17 @@ async function onChatCompletionSettingsReady(data) {
 function loadSettingsUI() {
     const settings = getSettings();
 
-    $("#rag_enabled").prop("checked", settings.enabled);
-    $("#rag_filter_by_profile").prop("checked", settings.filterByProfile);
-    $("#rag_datastore_id").val(settings.datastoreId);
-    $("#rag_tool_name").val(settings.toolName);
-    $("#rag_tool_description").val(settings.toolDescription);
-    $("#rag_use_native_retrieval").prop("checked", settings.useNativeRetrieval);
-    $("#rag_retrieval_provider").val(settings.retrievalProvider);
-    $("#rag_custom_retrieval_json").val(settings.customRetrievalJson);
-    $("#rag_tool_choice").val(settings.toolChoice);
-    $("#rag_max_results").val(settings.maxResults);
-    $("#rag_max_tokens").val(settings.maxTokens);
-    $("#rag_system_prompt").val(settings.ragSystemPrompt);
-    $("#rag_user_prompt_template").val(settings.ragUserPromptTemplate);
-    $("#rag_injection_template").val(settings.injectionTemplate);
-    $("#rag_injection_role").val(settings.injectionRole);
-    $("#rag_injection_position").val(settings.injectionPosition);
-    $("#rag_injection_depth").val(settings.injectionDepth);
-    $("#rag_injection_merge").prop("checked", settings.injectionMerge);
-    $("#rag_enable_main_model_tools").prop("checked", settings.enableMainModelTools);
-    $("#rag_main_model_tool_choice").val(settings.mainModelToolChoice);
-    $("#rag_system_prompt_addition").val(settings.systemPromptAddition);
-    $("#rag_reprocess_world_info").prop("checked", settings.reprocessWorldInfo);
-    $("#rag_debug_mode").prop("checked", settings.debugMode);
+    // Load all bound settings using the UI_BINDINGS configuration
+    UI_BINDINGS.forEach(({ id, key, type }) => {
+        const $el = $(`#${id}`);
+        const value = settings[key];
+
+        if (type === 'checkbox') {
+            $el.prop('checked', value);
+        } else {
+            $el.val(value);
+        }
+    });
 
     // Populate provider dropdown
     populateProviderDropdown();
@@ -884,29 +917,18 @@ function populateProviderDropdown() {
 function saveSettings() {
     const settings = extension_settings[EXTENSION_NAME];
 
-    settings.enabled = $("#rag_enabled").prop("checked");
-    settings.filterByProfile = $("#rag_filter_by_profile").prop("checked");
-    settings.datastoreId = $("#rag_datastore_id").val();
-    settings.toolName = $("#rag_tool_name").val();
-    settings.toolDescription = $("#rag_tool_description").val();
-    settings.useNativeRetrieval = $("#rag_use_native_retrieval").prop("checked");
-    settings.retrievalProvider = $("#rag_retrieval_provider").val();
-    settings.customRetrievalJson = $("#rag_custom_retrieval_json").val();
-    settings.toolChoice = $("#rag_tool_choice").val();
-    settings.maxResults = parseInt(String($("#rag_max_results").val())) || 5;
-    settings.maxTokens = parseInt(String($("#rag_max_tokens").val())) || 1000;
-    settings.ragSystemPrompt = $("#rag_system_prompt").val();
-    settings.ragUserPromptTemplate = $("#rag_user_prompt_template").val();
-    settings.injectionTemplate = $("#rag_injection_template").val();
-    settings.injectionRole = $("#rag_injection_role").val();
-    settings.injectionPosition = $("#rag_injection_position").val();
-    settings.injectionDepth = parseInt(String($("#rag_injection_depth").val())) || -1;
-    settings.injectionMerge = $("#rag_injection_merge").prop("checked");
-    settings.enableMainModelTools = $("#rag_enable_main_model_tools").prop("checked");
-    settings.mainModelToolChoice = $("#rag_main_model_tool_choice").val();
-    settings.systemPromptAddition = $("#rag_system_prompt_addition").val();
-    settings.reprocessWorldInfo = $("#rag_reprocess_world_info").prop("checked");
-    settings.debugMode = $("#rag_debug_mode").prop("checked");
+    // Save all bound settings using the UI_BINDINGS configuration
+    UI_BINDINGS.forEach(({ id, key, type, default: defaultValue }) => {
+        const $el = $(`#${id}`);
+
+        if (type === 'checkbox') {
+            settings[key] = $el.prop('checked');
+        } else if (type === 'number') {
+            settings[key] = parseInt(String($el.val()), 10) || defaultValue;
+        } else {
+            settings[key] = $el.val();
+        }
+    });
 
     saveSettingsDebounced();
 }
@@ -987,38 +1009,28 @@ jQuery(async () => {
         $("#rag_profile_filter_section").hide();
     }
 
-    // Set up event listeners for settings changes
-    $("#rag_enabled").on("change", saveSettings);
-    $("#rag_filter_by_profile").on("change", saveSettings);
-    $("#rag_datastore_id").on("input", saveSettings);
-    $("#rag_tool_name").on("input", saveSettings);
-    $("#rag_tool_description").on("input", saveSettings);
-    $("#rag_use_native_retrieval").on("change", () => {
-        updateToolTypeVisibility();
-        saveSettings();
+    // Set up event listeners for settings changes using UI_BINDINGS
+    // Map of extra handler names to their functions
+    const extraHandlers = {
+        updateToolTypeVisibility,
+        updateInjectionPositionVisibility,
+    };
+
+    UI_BINDINGS.forEach(({ id, type, onChangeExtra }) => {
+        const $el = $(`#${id}`);
+        // Use 'change' for checkboxes and selects, 'input' for text/number fields
+        const eventType = (type === 'checkbox' || type === 'select') ? 'change' : 'input';
+
+        if (onChangeExtra && extraHandlers[onChangeExtra]) {
+            // Element has a side effect handler
+            $el.on(eventType, () => {
+                extraHandlers[onChangeExtra]();
+                saveSettings();
+            });
+        } else {
+            $el.on(eventType, saveSettings);
+        }
     });
-    $("#rag_retrieval_provider").on("change", () => {
-        updateToolTypeVisibility();
-        saveSettings();
-    });
-    $("#rag_custom_retrieval_json").on("input", saveSettings);
-    $("#rag_tool_choice").on("change", saveSettings);
-    $("#rag_max_results").on("input", saveSettings);
-    $("#rag_max_tokens").on("input", saveSettings);
-    $("#rag_system_prompt").on("input", saveSettings);
-    $("#rag_user_prompt_template").on("input", saveSettings);
-    $("#rag_injection_template").on("input", saveSettings);
-    $("#rag_injection_role").on("change", saveSettings);
-    $("#rag_injection_position").on("change", () => {
-        updateInjectionPositionVisibility();
-        saveSettings();
-    });
-    $("#rag_injection_depth").on("input", saveSettings);
-    $("#rag_injection_merge").on("change", saveSettings);
-    $("#rag_enable_main_model_tools").on("change", saveSettings);
-    $("#rag_main_model_tool_choice").on("change", saveSettings);
-    $("#rag_system_prompt_addition").on("input", saveSettings);
-    $("#rag_debug_mode").on("change", saveSettings);
 
     // Register the main event handler
     eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, onChatCompletionSettingsReady);
