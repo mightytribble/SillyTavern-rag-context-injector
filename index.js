@@ -94,7 +94,7 @@ const DEFAULT_SETTINGS = {
 
     // Function Calling Settings
     toolChoice: "auto",       // "auto", "required", "none"
-    maxResults: 5,
+    maxResults: 10,
     maxTokens: 1000,          // Max tokens for RAG response
 
     // RAG Query Configuration
@@ -139,7 +139,7 @@ const UI_BINDINGS = [
     { id: 'rag_retrieval_provider', key: 'retrievalProvider', type: 'select', onChangeExtra: 'updateToolTypeVisibility' },
     { id: 'rag_custom_retrieval_json', key: 'customRetrievalJson', type: 'text', onChangeExtra: 'validateCustomJson' },
     { id: 'rag_tool_choice', key: 'toolChoice', type: 'select' },
-    { id: 'rag_max_results', key: 'maxResults', type: 'number', default: 5 },
+    { id: 'rag_max_results', key: 'maxResults', type: 'number', default: 10 },
     { id: 'rag_max_tokens', key: 'maxTokens', type: 'number', default: 1000 },
     { id: 'rag_system_prompt', key: 'ragSystemPrompt', type: 'text' },
     { id: 'rag_user_prompt_template', key: 'ragUserPromptTemplate', type: 'text' },
@@ -165,7 +165,7 @@ function getSettings() {
 
 /**
  * Debug log helper
- * @param  {...any} args 
+ * @param  {...any} args
  */
 function debugLog(...args) {
     if (getSettings().debugMode) {
