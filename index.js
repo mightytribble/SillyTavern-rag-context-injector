@@ -318,12 +318,31 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     let result = template;
 
     // Get context for character/user names and GLOBAL CHAT HISTORY
+    // Get context for character/user names and GLOBAL CHAT HISTORY
     const context = getContext();
-    const characterName = context?.name2 || "Assistant";
-    const userName = context?.name1 || "User";
-    const description = context?.description || "";
-    const personality = context?.personality || "";
-    const scenario = context?.scenario || "";
+
+    // Default values from direct properties or context
+    let characterName = context?.name2 || "Assistant";
+    let userName = context?.name1 || "User";
+    let description = context?.description || "";
+    let personality = context?.personality || "";
+    let scenario = context?.scenario || "";
+
+    // Attempt to get data from character card fields (more reliable for detailed fields)
+    if (context && typeof context.getCharacterCardFields === 'function') {
+        try {
+            const fields = context.getCharacterCardFields();
+            if (fields) {
+                if (fields.name) characterName = fields.name;
+                if (fields.description) description = fields.description;
+                if (fields.personality) personality = fields.personality;
+                if (fields.scenario) scenario = fields.scenario;
+            }
+        } catch (e) {
+            // Fallback to standard context properties
+            console.warn(DEBUG_PREFIX, "Error fetching character card fields:", e);
+        }
+    }
 
     // Use global chat history for macros as it's more reliable than prompt messages
     // promptMessages only contains what's being sent to LLM (often truncated or system-only)
