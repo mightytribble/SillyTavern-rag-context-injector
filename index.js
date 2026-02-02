@@ -315,13 +315,37 @@ function convertSillyTavernToOpenAI(chatMessages) {
 function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     if (!template) return "";
 
-    let result = template;
-
-    // Get context for character/user names and GLOBAL CHAT HISTORY
-    // Get context for character/user names and GLOBAL CHAT HISTORY
     const context = getContext();
 
-    // Default values from direct properties or context
+    // 1. Handle custom replacements first (ragResponse, worldInfo)
+    let result = template;
+    const customReplacements = {
+        ragResponse: extraReplacements.ragResponse || "",
+        worldInfoBefore: extraReplacements.worldInfoBefore || "",
+        worldInfoAfter: extraReplacements.worldInfoAfter || "",
+        ...extraReplacements
+    };
+
+    for (const [key, value] of Object.entries(customReplacements)) {
+        if (key === 'ragResponse' || key.startsWith('worldInfo')) {
+            result = result.replace(new RegExp(`{{${key}}}`, 'g'), () => value || "");
+        }
+    }
+
+    // 2. Use SillyTavern's native macro substitution if available
+    if (context && typeof context.substituteParams === 'function') {
+        // substituteParams uses the current global state (character, chat, etc)
+        // This is robust and supports {{scenario}}, {{char}}, {{user}}, etc.
+        result = context.substituteParams(result);
+
+        // 3. Handle patterns that native macros might miss or that we want to support specifically
+        // (Native engine handles most things now, but we'll keep our slicers just in case if they aren't standard)
+        // ... Native engine likely handles custom macros too.
+
+        return result;
+    }
+
+    // Fallback: If substituteParams is missing (should not happen if extension API is modern)
     let characterName = context?.name2 || "Assistant";
     let userName = context?.name1 || "User";
     let description = context?.description || "";
@@ -392,7 +416,6 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
         if (startIdx < 0 && Math.abs(startIdx) > chatMessages.length) {
             startIdx = 0;
         }
-
         const sliced = chatMessages.slice(startIdx, endIdx);
         return formatMessagesForContext(sliced);
     });
