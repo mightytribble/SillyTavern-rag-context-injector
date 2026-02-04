@@ -16,6 +16,19 @@ const EXTENSION_NAME = "rag-context-injector";
 const EXTENSION_FOLDER = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const DEBUG_PREFIX = "[RAG Injector]";
 
+// Message Roles
+const ROLES = {
+    USER: "user",
+    ASSISTANT: "assistant",
+    SYSTEM: "system",
+};
+
+// World Info Identifiers
+const WORLD_INFO = {
+    BEFORE: "worldInfoBefore",
+    AFTER: "worldInfoAfter",
+};
+
 // Supported retrieval providers
 // Tool format must include 'type' property - backend extracts via tool[tool.type]
 const RETRIEVAL_PROVIDERS = {
@@ -81,7 +94,7 @@ const DEFAULT_SETTINGS = {
 
     // Function Calling Settings
     toolChoice: "auto",       // "auto", "required", "none"
-    maxResults: 5,
+    maxResults: 10,
     maxTokens: 1000,          // Max tokens for RAG response
 
     // RAG Query Configuration
@@ -111,6 +124,38 @@ const DEFAULT_SETTINGS = {
 };
 
 /**
+ * UI element bindings configuration
+ * Maps DOM element IDs to settings keys with type information
+ * Types: 'checkbox' (boolean), 'text' (string), 'number' (integer), 'select' (string)
+ * Special handlers are needed for elements with side effects (marked with onChangeExtra)
+ */
+const UI_BINDINGS = [
+    { id: 'rag_enabled', key: 'enabled', type: 'checkbox' },
+    { id: 'rag_filter_by_profile', key: 'filterByProfile', type: 'checkbox' },
+    { id: 'rag_datastore_id', key: 'datastoreId', type: 'text' },
+    { id: 'rag_tool_name', key: 'toolName', type: 'text' },
+    { id: 'rag_tool_description', key: 'toolDescription', type: 'text' },
+    { id: 'rag_use_native_retrieval', key: 'useNativeRetrieval', type: 'checkbox', onChangeExtra: 'updateToolTypeVisibility' },
+    { id: 'rag_retrieval_provider', key: 'retrievalProvider', type: 'select', onChangeExtra: 'updateToolTypeVisibility' },
+    { id: 'rag_custom_retrieval_json', key: 'customRetrievalJson', type: 'text', onChangeExtra: 'validateCustomJson' },
+    { id: 'rag_tool_choice', key: 'toolChoice', type: 'select' },
+    { id: 'rag_max_results', key: 'maxResults', type: 'number', default: 10 },
+    { id: 'rag_max_tokens', key: 'maxTokens', type: 'number', default: 1000 },
+    { id: 'rag_system_prompt', key: 'ragSystemPrompt', type: 'text' },
+    { id: 'rag_user_prompt_template', key: 'ragUserPromptTemplate', type: 'text' },
+    { id: 'rag_injection_template', key: 'injectionTemplate', type: 'text' },
+    { id: 'rag_injection_role', key: 'injectionRole', type: 'select' },
+    { id: 'rag_injection_position', key: 'injectionPosition', type: 'select', onChangeExtra: 'updateInjectionPositionVisibility' },
+    { id: 'rag_injection_depth', key: 'injectionDepth', type: 'number', default: -1 },
+    { id: 'rag_injection_merge', key: 'injectionMerge', type: 'checkbox' },
+    { id: 'rag_enable_main_model_tools', key: 'enableMainModelTools', type: 'checkbox' },
+    { id: 'rag_main_model_tool_choice', key: 'mainModelToolChoice', type: 'select' },
+    { id: 'rag_system_prompt_addition', key: 'systemPromptAddition', type: 'text' },
+    { id: 'rag_reprocess_world_info', key: 'reprocessWorldInfo', type: 'checkbox' },
+    { id: 'rag_debug_mode', key: 'debugMode', type: 'checkbox' },
+];
+
+/**
  * Get current settings with defaults
  * @returns {typeof DEFAULT_SETTINGS}
  */
@@ -120,7 +165,7 @@ function getSettings() {
 
 /**
  * Debug log helper
- * @param  {...any} args 
+ * @param  {...any} args
  */
 function debugLog(...args) {
     if (getSettings().debugMode) {
@@ -184,7 +229,7 @@ let isProcessingRag = false;
  */
 function getLastUserMessage(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
+        if (messages[i].role === ROLES.USER) {
             return messages[i].content || "";
         }
     }
@@ -198,7 +243,7 @@ function getLastUserMessage(messages) {
  * @returns {string} - Formatted messages
  */
 function getLastNMessages(messages, n) {
-    const chatMessages = messages.filter(m => m.role !== "system");
+    const chatMessages = messages.filter(m => m.role !== ROLES.SYSTEM);
     const lastN = chatMessages.slice(-n);
     return formatMessagesForContext(lastN);
 }
@@ -220,7 +265,7 @@ function getRecentHistory(messages, count = 10) {
  */
 function formatMessagesForContext(messages) {
     return messages.map(m => {
-        const role = m.role === "user" ? "User" : "Assistant";
+        const role = m.role === ROLES.USER ? "User" : "Assistant";
         const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
         return `${role}: ${content}`;
     }).join("\n\n");
@@ -235,11 +280,11 @@ function convertSillyTavernToOpenAI(chatMessages) {
     if (!Array.isArray(chatMessages)) return [];
 
     return chatMessages.map(msg => {
-        let role = "assistant";
+        let role = ROLES.ASSISTANT;
         if (msg.is_user) {
-            role = "user";
+            role = ROLES.USER;
         } else if (msg.is_system) {
-            role = "system";
+            role = ROLES.SYSTEM;
         }
 
         const converted = {
@@ -270,15 +315,58 @@ function convertSillyTavernToOpenAI(chatMessages) {
 function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     if (!template) return "";
 
-    let result = template;
-
-    // Get context for character/user names and GLOBAL CHAT HISTORY
     const context = getContext();
-    const characterName = context?.name2 || "Assistant";
-    const userName = context?.name1 || "User";
-    const description = context?.description || "";
-    const personality = context?.personality || "";
-    const scenario = context?.scenario || "";
+
+    // 1. Handle custom replacements first (ragResponse, worldInfo)
+    let result = template;
+    const customReplacements = {
+        ragResponse: extraReplacements.ragResponse || "",
+        worldInfoBefore: extraReplacements.worldInfoBefore || "",
+        worldInfoAfter: extraReplacements.worldInfoAfter || "",
+        ...extraReplacements
+    };
+
+    for (const [key, value] of Object.entries(customReplacements)) {
+        if (key === 'ragResponse' || key.startsWith('worldInfo')) {
+            result = result.replace(new RegExp(`{{${key}}}`, 'g'), () => value || "");
+        }
+    }
+
+    // 2. Use SillyTavern's native macro substitution if available
+    if (context && typeof context.substituteParams === 'function') {
+        // substituteParams uses the current global state (character, chat, etc)
+        // This is robust and supports {{scenario}}, {{char}}, {{user}}, etc.
+        result = context.substituteParams(result);
+
+        // 3. Handle patterns that native macros might miss or that we want to support specifically
+        // (Native engine handles most things now, but we'll keep our slicers just in case if they aren't standard)
+        // ... Native engine likely handles custom macros too.
+
+        return result;
+    }
+
+    // Fallback: If substituteParams is missing (should not happen if extension API is modern)
+    let characterName = context?.name2 || "Assistant";
+    let userName = context?.name1 || "User";
+    let description = context?.description || "";
+    let personality = context?.personality || "";
+    let scenario = context?.scenario || "";
+
+    // Attempt to get data from character card fields (more reliable for detailed fields)
+    if (context && typeof context.getCharacterCardFields === 'function') {
+        try {
+            const fields = context.getCharacterCardFields();
+            if (fields) {
+                if (fields.name) characterName = fields.name;
+                if (fields.description) description = fields.description;
+                if (fields.personality) personality = fields.personality;
+                if (fields.scenario) scenario = fields.scenario;
+            }
+        } catch (e) {
+            // Fallback to standard context properties
+            console.warn(DEBUG_PREFIX, "Error fetching character card fields:", e);
+        }
+    }
 
     // Use global chat history for macros as it's more reliable than prompt messages
     // promptMessages only contains what's being sent to LLM (often truncated or system-only)
@@ -289,7 +377,7 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     const baseVars = {
         lastMessage: getLastUserMessage(messages),
         recentHistory: getRecentHistory(messages, 10),
-        fullHistory: formatMessagesForContext(messages.filter(m => m.role !== "system")),
+        fullHistory: formatMessagesForContext(messages.filter(m => m.role !== ROLES.SYSTEM)),
         characterName: characterName,
         char: characterName,
         Char: characterName, // Capitalized alias
@@ -321,14 +409,13 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     result = result.replace(slicePattern, (match, start, end) => {
         let startIdx = parseInt(start, 10);
         const endIdx = end ? parseInt(end, 10) : undefined;
-        const chatMessages = messages.filter(m => m.role !== "system");
+        const chatMessages = messages.filter(m => m.role !== ROLES.SYSTEM);
 
         // Graceful handling for negative indices that exceed length
         // e.g. slice(-10) on array of length 8 should be slice(0)
         if (startIdx < 0 && Math.abs(startIdx) > chatMessages.length) {
             startIdx = 0;
         }
-
         const sliced = chatMessages.slice(startIdx, endIdx);
         return formatMessagesForContext(sliced);
     });
@@ -356,7 +443,7 @@ function reconstructMessages(data) {
     if (globalChat.length === 0) return;
 
     // Count non-system messages in data.messages
-    const nonSystemCount = data.messages.filter(m => m.role !== "system").length;
+    const nonSystemCount = data.messages.filter(m => m.role !== ROLES.SYSTEM).length;
 
     // If we have significantly fewer messages than global chat, something is wrong
     // (Allow some difference for context shifting/token limits, but 0 vs 8 is a bug)
@@ -367,7 +454,7 @@ function reconstructMessages(data) {
 
         // Append history to existing messages (which are likely system prompts)
         // We filter out system messages from history to avoid duplication if they are already in data.messages
-        const historyToAdd = convertedHistory.filter(m => m.role !== "system");
+        const historyToAdd = convertedHistory.filter(m => m.role !== ROLES.SYSTEM);
 
         data.messages.push(...historyToAdd);
 
@@ -390,7 +477,7 @@ function injectRagContext(messages, content, settings) {
     // Find "start of chat" = index of first non-system message
     function findStartIndex() {
         for (let i = 0; i < messages.length; i++) {
-            if (messages[i].role !== "system") {
+            if (messages[i].role !== ROLES.SYSTEM) {
                 return i;
             }
         }
@@ -436,6 +523,255 @@ function injectRagContext(messages, content, settings) {
 }
 
 /**
+ * Check if RAG processing should run
+ * @param {object} settings - Extension settings
+ * @param {object} data - Request data
+ * @returns {{ shouldRun: boolean, reason?: string }}
+ */
+function shouldRunRag(settings, data) {
+    if (!settings.enabled) return { shouldRun: false, reason: 'Extension disabled' };
+    if (isProcessingRag) return { shouldRun: false, reason: 'Already processing' };
+    if (!settings.ragProfileId) return { shouldRun: false, reason: 'No RAG profile' };
+
+    if (settings.filterByProfile && settings.filterProfileId) {
+        const context = getContext();
+        const currentProfile = context.extensionSettings?.connectionManager?.selectedProfile;
+        if (currentProfile !== settings.filterProfileId) {
+            return { shouldRun: false, reason: 'Profile filter mismatch' };
+        }
+    }
+
+    if (settings.useNativeRetrieval) {
+        const provider = settings.retrievalProvider;
+        if (provider !== 'googleSearch' && !settings.datastoreId) {
+            return { shouldRun: false, reason: 'No datastore ID' };
+        }
+        if (provider === 'custom' && !settings.customRetrievalJson) {
+            return { shouldRun: false, reason: 'No custom retrieval JSON' };
+        }
+    }
+
+    return { shouldRun: true };
+}
+
+/**
+ * Extract World Info strings from context
+ * @param {Array} messages - Chat messages
+ * @returns {Promise<{ before: string, after: string }>}
+ */
+async function extractWorldInfo(messages) {
+    let worldInfoBefore = "";
+    let worldInfoAfter = "";
+
+    try {
+        const context = getContext();
+        if (context && context.getWorldInfoPrompt && context.getCharacterCardFields) {
+            // Prepare scan data
+            const globalScanData = context.getCharacterCardFields();
+            const scanData = {
+                ...globalScanData,
+                personaDescription: globalScanData.persona,
+                characterDescription: globalScanData.description,
+                characterPersonality: globalScanData.personality,
+                characterDepthPrompt: globalScanData.charDepthPrompt,
+                trigger: 'normal',
+            };
+
+            // Extract content strings for the scan
+            const chatStrings = messages
+                .map(m => {
+                    if (typeof m.content === 'string') return m.content;
+                    if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
+                    return '';
+                });
+
+            // Get max context
+            const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
+
+            // Get World Info - use isDryRun=true to avoid emitting events
+            const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, true, scanData);
+
+            worldInfoBefore = wiResult.worldInfoBefore || "";
+            worldInfoAfter = wiResult.worldInfoAfter || "";
+
+            debugLog(`Retrieved World Info: Before=${worldInfoBefore.length} chars, After=${worldInfoAfter.length} chars`);
+        } else {
+            console.warn(DEBUG_PREFIX, "Context or getWorldInfoPrompt not available");
+        }
+    } catch (error) {
+        console.error(DEBUG_PREFIX, "Error retrieving World Info:", error);
+    }
+
+    return { before: worldInfoBefore, after: worldInfoAfter };
+}
+
+/**
+ * Send RAG request and return response
+ * @param {object} settings - Extension settings
+ * @param {Array} messages - Chat messages
+ * @param {object} worldInfo - World Info strings {before, after}
+ * @returns {Promise<string>} - RAG response content
+ */
+async function sendRagRequest(settings, messages, worldInfo) {
+    // Build the RAG query
+    const userPrompt = replaceTemplateVars(settings.ragUserPromptTemplate, messages, {
+        worldInfoBefore: worldInfo.before,
+        worldInfoAfter: worldInfo.after
+    });
+
+    // Build messages for RAG request
+    const systemPrompt = replaceTemplateVars(settings.ragSystemPrompt, messages, {
+        worldInfoBefore: worldInfo.before,
+        worldInfoAfter: worldInfo.after
+    });
+
+    const ragMessages = [
+        { role: ROLES.SYSTEM, content: systemPrompt },
+        { role: ROLES.USER, content: userPrompt }
+    ];
+    console.log(DEBUG_PREFIX, "RAG messages built:", ragMessages.length);
+    debugLog("[[DEBUG]] Sending ragMessages:", JSON.stringify(ragMessages, null, 2));
+
+    // Build the tool to include
+    const tool = settings.useNativeRetrieval
+        ? buildRetrievalTool()
+        : buildFunctionTool();
+
+    if (!tool) {
+        console.log(DEBUG_PREFIX, "Failed to build tool, skipping");
+        return "";
+    }
+
+    console.log(DEBUG_PREFIX, "Sending RAG request with tool:", JSON.stringify(tool));
+
+    // Send request to the RAG profile
+    const result = await ConnectionManagerRequestService.sendRequest(
+        settings.ragProfileId,
+        ragMessages,
+        settings.maxTokens,
+        {
+            stream: false,
+            extractData: true,
+        },
+        {
+            tools: [tool],
+            tool_choice: settings.toolChoice === "required" ? "required" : "auto",
+            // Vertex AI auth settings - uses full mode with service account
+            vertexai_auth_mode: 'full',
+        }
+    );
+
+    debugLog("RAG response received:", result);
+
+    // Extract the response content
+    // @ts-ignore
+    return (typeof result === 'object' && result !== null && 'content' in result)
+        ? result.content
+        : "";
+}
+
+/**
+ * Reprocess World Info with new context
+ * @param {Array} messages - Chat messages (mutated in-place)
+ */
+async function reprocessWorldInfo(messages) {
+    console.log(DEBUG_PREFIX, "Reprocessing World Info with new context...");
+    const context = getContext();
+
+    if (!context || !context.getWorldInfoPrompt || !context.getCharacterCardFields) {
+        console.warn(DEBUG_PREFIX, "Context functions missing, skipping World Info reprocessing");
+        return;
+    }
+
+    try {
+        // Find indices of existing World Info messages
+        let wiBeforeIndex = -1;
+        let wiAfterIndex = -1;
+
+        for (let i = 0; i < messages.length; i++) {
+            if (messages[i].identifier === WORLD_INFO.BEFORE) wiBeforeIndex = i;
+            if (messages[i].identifier === WORLD_INFO.AFTER) wiAfterIndex = i;
+        }
+
+        // Capture the existing roles before we modify anything (default to ROLES.SYSTEM if not found)
+        const worldInfoBeforeRole = wiBeforeIndex !== -1 ? messages[wiBeforeIndex].role : ROLES.SYSTEM;
+        const worldInfoAfterRole = wiAfterIndex !== -1 ? messages[wiAfterIndex].role : ROLES.SYSTEM;
+
+        // Prepare for scan
+        const globalScanData = context.getCharacterCardFields();
+        const scanData = {
+            ...globalScanData,
+            personaDescription: globalScanData.persona,
+            characterDescription: globalScanData.description,
+            characterPersonality: globalScanData.personality,
+            characterDepthPrompt: globalScanData.charDepthPrompt,
+            trigger: 'normal',
+        };
+
+        // Extract content strings for the scan
+        // IMPORTANT: Exclude existing WI from the scan to prevent self-triggering loops
+        const chatStrings = messages
+            .filter(m => m.identifier !== WORLD_INFO.BEFORE && m.identifier !== WORLD_INFO.AFTER)
+            .map(m => {
+                if (typeof m.content === 'string') return m.content;
+                if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
+                return '';
+            });
+
+        // Get max context
+        const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
+
+        // Re-generate WI
+        const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, false, scanData);
+
+        // Update our local strings
+        const worldInfoBefore = wiResult.worldInfoBefore || "";
+        const worldInfoAfter = wiResult.worldInfoAfter || "";
+
+        debugLog(`Regenerated World Info: Before=${worldInfoBefore.length}, After=${worldInfoAfter.length}`);
+
+        // Update messages IN-PLACE to preserve order
+
+        // Update or Insert 'worldInfoAfter'
+        if (wiAfterIndex !== -1) {
+            if (worldInfoAfter) {
+                messages[wiAfterIndex].content = worldInfoAfter;
+                messages[wiAfterIndex].role = worldInfoAfterRole; // Use retained role
+            } else {
+                messages.splice(wiAfterIndex, 1);
+                // Adjust beforeIndex if it was after the spliced element
+                if (wiBeforeIndex > wiAfterIndex) wiBeforeIndex--;
+            }
+        } else if (worldInfoAfter) {
+            messages.push({
+                role: worldInfoAfterRole,
+                content: worldInfoAfter,
+                identifier: WORLD_INFO.AFTER
+            });
+        }
+
+        // Update or Insert 'worldInfoBefore'
+        if (wiBeforeIndex !== -1) {
+            if (worldInfoBefore) {
+                messages[wiBeforeIndex].content = worldInfoBefore;
+                messages[wiBeforeIndex].role = worldInfoBeforeRole; // Use retained role
+            } else {
+                messages.splice(wiBeforeIndex, 1);
+            }
+        } else if (worldInfoBefore) {
+            messages.unshift({
+                role: worldInfoBeforeRole,
+                content: worldInfoBefore,
+                identifier: WORLD_INFO.BEFORE
+            });
+        }
+
+    } catch (e) {
+        console.error(DEBUG_PREFIX, "Error reprocessing World Info:", e);
+    }
+}
+
+/**
  * Main injection handler - sends RAG request and injects response
  * Triggered by CHAT_COMPLETION_SETTINGS_READY event
  * @param {object} data - The request payload being prepared
@@ -445,56 +781,11 @@ async function onChatCompletionSettingsReady(data) {
     console.log(DEBUG_PREFIX, "Event triggered - CHAT_COMPLETION_SETTINGS_READY");
     const settings = getSettings();
 
-    // [[DEBUG]] Log initial state
-    debugLog("[[DEBUG]] Entry data.messages:", JSON.stringify(data.messages, null, 2));
-
-    console.log(DEBUG_PREFIX, "Settings:", {
-        enabled: settings.enabled,
-        ragProfileId: settings.ragProfileId,
-        useNativeRetrieval: settings.useNativeRetrieval,
-        reprocessWorldInfo: settings.reprocessWorldInfo,
-        debugMode: settings.debugMode
-    });
-
-    // Check if extension is enabled
-    if (!settings.enabled) {
-        console.log(DEBUG_PREFIX, "Extension disabled, skipping");
+    // Check if we should run
+    const validation = shouldRunRag(settings, data);
+    if (!validation.shouldRun) {
+        if (validation.reason) console.log(DEBUG_PREFIX, `${validation.reason}, skipping`);
         return;
-    }
-
-    // Prevent infinite loops from our own RAG requests
-    if (isProcessingRag) {
-        console.log(DEBUG_PREFIX, "Already processing RAG, skipping to prevent loop");
-        return;
-    }
-
-    // Must have a RAG profile selected
-    if (!settings.ragProfileId) {
-        console.log(DEBUG_PREFIX, "No RAG profile selected, skipping");
-        return;
-    }
-
-    // Optional: Filter by connection profile
-    if (settings.filterByProfile && settings.filterProfileId) {
-        const context = getContext();
-        const currentProfile = context.extensionSettings?.connectionManager?.selectedProfile;
-        if (currentProfile !== settings.filterProfileId) {
-            console.log(DEBUG_PREFIX, "Profile filter mismatch, skipping");
-            return;
-        }
-    }
-
-    // Validate tool configuration
-    if (settings.useNativeRetrieval) {
-        const provider = settings.retrievalProvider;
-        if (provider !== "googleSearch" && !settings.datastoreId) {
-            console.log(DEBUG_PREFIX, "No datastore ID configured for native retrieval, skipping");
-            return;
-        }
-        if (provider === "custom" && !settings.customRetrievalJson) {
-            console.log(DEBUG_PREFIX, "No custom retrieval JSON configured, skipping");
-            return;
-        }
     }
 
     console.log(DEBUG_PREFIX, "Starting RAG request to profile:", settings.ragProfileId);
@@ -506,49 +797,7 @@ async function onChatCompletionSettingsReady(data) {
         reconstructMessages(data);
 
         // Extract Existing World Info (for template macros)
-        // World Info is NOT stored with identifier fields in data.messages.
-        // Instead, we need to call getWorldInfoPrompt() directly to get the WI strings.
-        let worldInfoBefore = "";
-        let worldInfoAfter = "";
-
-        try {
-            const context = getContext();
-            if (context && context.getWorldInfoPrompt && context.getCharacterCardFields) {
-                // Prepare scan data
-                const globalScanData = context.getCharacterCardFields();
-                const scanData = {
-                    ...globalScanData,
-                    personaDescription: globalScanData.persona,
-                    characterDescription: globalScanData.description,
-                    characterPersonality: globalScanData.personality,
-                    characterDepthPrompt: globalScanData.charDepthPrompt,
-                    trigger: 'normal',
-                };
-
-                // Extract content strings for the scan
-                const chatStrings = data.messages
-                    .map(m => {
-                        if (typeof m.content === 'string') return m.content;
-                        if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
-                        return '';
-                    });
-
-                // Get max context
-                const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
-
-                // Get World Info - use isDryRun=true to avoid emitting events
-                const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, true, scanData);
-
-                worldInfoBefore = wiResult.worldInfoBefore || "";
-                worldInfoAfter = wiResult.worldInfoAfter || "";
-
-                debugLog(`Retrieved World Info: Before=${worldInfoBefore.length} chars, After=${worldInfoAfter.length} chars`);
-            } else {
-                console.warn(DEBUG_PREFIX, "Context or getWorldInfoPrompt not available");
-            }
-        } catch (error) {
-            console.error(DEBUG_PREFIX, "Error retrieving World Info:", error);
-        }
+        const worldInfo = await extractWorldInfo(data.messages);
 
         // [[ENHANCED DEBUG]] Log all message identifiers to see what's actually in the request
         debugLog("[[DEBUG]] Message identifiers in data.messages:",
@@ -559,106 +808,20 @@ async function onChatCompletionSettingsReady(data) {
                     Array.isArray(m.content) ? m.content.length + ' items' : 'unknown'
             }))
         );
-        debugLog("[[DEBUG]] World Info extracted - Before:", worldInfoBefore.substring(0, 300) + (worldInfoBefore.length > 300 ? '...' : ''), `(total: ${worldInfoBefore.length} chars)`);
-        debugLog("[[DEBUG]] World Info extracted - After:", worldInfoAfter.substring(0, 300) + (worldInfoAfter.length > 300 ? '...' : ''), `(total: ${worldInfoAfter.length} chars)`);
-        debugLog("[[DEBUG]] RAG User Prompt Template:", settings.ragUserPromptTemplate);
 
-        // Build the RAG query
-        // Pass extracted WI as extras to replaceTemplateVars so {{worldInfoBefore}} works
-        const userPrompt = replaceTemplateVars(settings.ragUserPromptTemplate, data.messages, {
-            worldInfoBefore: worldInfoBefore,
-            worldInfoAfter: worldInfoAfter
-        });
-
-        // [[ENHANCED DEBUG]] Log the final query to verify macro replacement
-        debugLog("[[DEBUG]] Final RAG userPrompt (first 500 chars):", userPrompt.substring(0, 500) + (userPrompt.length > 500 ? '...' : ''));
-        debugLog("[[DEBUG]] Full userPrompt length:", userPrompt.length);
-
-        // Build messages for RAG request
-        // Process system prompt through replaceTemplateVars to support macros
-        const systemPrompt = replaceTemplateVars(settings.ragSystemPrompt, data.messages, {
-            worldInfoBefore: worldInfoBefore,
-            worldInfoAfter: worldInfoAfter
-        });
-
-        const ragMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-        ];
-        console.log(DEBUG_PREFIX, "RAG messages built:", ragMessages.length);
-        debugLog("[[DEBUG]] Sending ragMessages:", JSON.stringify(ragMessages, null, 2));
-
-
-        // Build the tool to include
-        const tool = settings.useNativeRetrieval
-            ? buildRetrievalTool()
-            : buildFunctionTool();
-
-        if (!tool) {
-            console.log(DEBUG_PREFIX, "Failed to build tool, skipping");
-            return;
-        }
-
-        console.log(DEBUG_PREFIX, "Sending RAG request with tool:", JSON.stringify(tool));
-
-        // Send request to the RAG profile
-        // Note: For Vertex AI profiles, we need to explicitly set auth_mode
-        const result = await ConnectionManagerRequestService.sendRequest(
-            settings.ragProfileId,
-            ragMessages,
-            settings.maxTokens,
-            {
-                stream: false,
-                extractData: true,
-            },
-            {
-                tools: [tool],
-                tool_choice: settings.toolChoice === "required" ? "required" : "auto",
-                // Vertex AI auth settings - uses full mode with service account
-                vertexai_auth_mode: 'full',
-            }
-        );
-
-        // [[DEBUG]] Log state after the request
-        debugLog("[[DEBUG]] data.messages after RAG request (before injection):", JSON.stringify(data.messages, null, 2));
-        debugLog("RAG response received:", result);
-
-        // Extract the response content (handle different result shapes)
-        // @ts-ignore - result type depends on extractData setting
-        const ragResponse = (typeof result === 'object' && result !== null && 'content' in result)
-            ? result.content
-            : "";
+        // Send RAG request
+        const ragResponse = await sendRagRequest(settings, data.messages, worldInfo);
 
         if (!ragResponse) {
             debugLog("No RAG response content, continuing without injection");
             return;
         }
 
-        // --- WORLD INFO REPROCESSING LOGIC ---
-        // If enabled, we strip old WI, re-scan the chat (which will later include RAG), and update WI strings.
-        // Actually, we need to inject RAG first, THEN re-scan.
-
-        let shouldReprocess = settings.reprocessWorldInfo;
-
-        // Verify context availability just in case
-        const context = getContext();
-        if (shouldReprocess && (!context || !context.getWorldInfoPrompt || !context.getCharacterCardFields)) {
-            console.warn(DEBUG_PREFIX, "Context functions missing, skipping World Info reprocessing");
-            shouldReprocess = false;
-        }
-
-        // 1. Inject RAG context (we do this BEFORE reprocessing so the new content is part of the scan)
-        // BUT wait, if we inject first, we need to populate '{{worldInfoBefore}}' in the injection template?
-        // Usually injection template uses {{ragResponse}}. If it uses WI macros, they might be stale until reprocessed.
-        // Let's assume injection template uses ragResponse mainly.
-
         // Format the injection using the template
-        // We use the *initial* WI strings here. If the user puts {{worldInfoBefore}} in the injection template, 
-        // they get the pre-RAG version. This is acceptable/expected behavior.
         const injectionContent = replaceTemplateVars(settings.injectionTemplate, data.messages, {
             ragResponse: ragResponse,
-            worldInfoBefore: worldInfoBefore,
-            worldInfoAfter: worldInfoAfter
+            worldInfoBefore: worldInfo.before,
+            worldInfoAfter: worldInfo.after
         });
         debugLog("[[DEBUG]] Injection content:", injectionContent);
 
@@ -666,97 +829,14 @@ async function onChatCompletionSettingsReady(data) {
         if (Array.isArray(data.messages) && data.messages.length > 0) {
             injectRagContext(data.messages, injectionContent, settings);
 
-            // 2. Now perform reprocessing if enabled
-            if (shouldReprocess) {
-                console.log(DEBUG_PREFIX, "Reprocessing World Info with new context...");
-
-                try {
-                    // Find indices of existing World Info messages
-                    let wiBeforeIndex = -1;
-                    let wiAfterIndex = -1;
-
-                    for (let i = 0; i < data.messages.length; i++) {
-                        if (data.messages[i].identifier === 'worldInfoBefore') wiBeforeIndex = i;
-                        if (data.messages[i].identifier === 'worldInfoAfter') wiAfterIndex = i;
-                    }
-
-                    // Prepare for scan
-                    const globalScanData = context.getCharacterCardFields();
-                    const scanData = {
-                        ...globalScanData,
-                        personaDescription: globalScanData.persona,
-                        characterDescription: globalScanData.description,
-                        characterPersonality: globalScanData.personality,
-                        characterDepthPrompt: globalScanData.charDepthPrompt,
-                        trigger: 'normal',
-                    };
-
-                    // Extract content strings for the scan
-                    // IMPORTANT: Exclude existing WI from the scan to prevent self-triggering loops
-                    const chatStrings = data.messages
-                        .filter(m => m.identifier !== 'worldInfoBefore' && m.identifier !== 'worldInfoAfter')
-                        .map(m => {
-                            if (typeof m.content === 'string') return m.content;
-                            if (Array.isArray(m.content)) return m.content.map(c => c.text || '').join('\n');
-                            return '';
-                        });
-
-                    // Get max context
-                    const maxContext = context.chatCompletionSettings?.openai_max_context || 4096;
-
-                    // Re-generate WI
-                    const wiResult = await context.getWorldInfoPrompt(chatStrings, maxContext, false, scanData);
-
-                    // Update our local strings
-                    worldInfoBefore = wiResult.worldInfoBefore || "";
-                    worldInfoAfter = wiResult.worldInfoAfter || "";
-
-                    debugLog(`Regenerated World Info: Before=${worldInfoBefore.length}, After=${worldInfoAfter.length}`);
-
-                    // Update data.messages IN-PLACE to preserve order
-
-                    // Update or Insert 'worldInfoAfter'
-                    if (wiAfterIndex !== -1) {
-                        if (worldInfoAfter) {
-                            data.messages[wiAfterIndex].content = worldInfoAfter;
-                            data.messages[wiAfterIndex].role = worldInfoAfterRole; // Use retained role
-                        } else {
-                            data.messages.splice(wiAfterIndex, 1);
-                            // Adjust beforeIndex if it was after the spliced element (unlikely for 'Before', but good practice)
-                            if (wiBeforeIndex > wiAfterIndex) wiBeforeIndex--;
-                        }
-                    } else if (worldInfoAfter) {
-                        data.messages.push({
-                            role: worldInfoAfterRole,
-                            content: worldInfoAfter,
-                            identifier: 'worldInfoAfter'
-                        });
-                    }
-
-                    // Update or Insert 'worldInfoBefore'
-                    if (wiBeforeIndex !== -1) {
-                        if (worldInfoBefore) {
-                            data.messages[wiBeforeIndex].content = worldInfoBefore;
-                            data.messages[wiBeforeIndex].role = worldInfoBeforeRole; // Use retained role
-                        } else {
-                            data.messages.splice(wiBeforeIndex, 1);
-                        }
-                    } else if (worldInfoBefore) {
-                        data.messages.unshift({
-                            role: worldInfoBeforeRole,
-                            content: worldInfoBefore,
-                            identifier: 'worldInfoBefore'
-                        });
-                    }
-
-                } catch (e) {
-                    console.error(DEBUG_PREFIX, "Error reprocessing World Info:", e);
-                }
+            // Reprocess World Info if enabled
+            if (settings.reprocessWorldInfo) {
+                await reprocessWorldInfo(data.messages);
             }
 
             // Optionally append to system prompt
             if (settings.systemPromptAddition && Array.isArray(data.messages)) {
-                const systemMessage = data.messages.find(m => m.role === "system");
+                const systemMessage = data.messages.find(m => m.role === ROLES.SYSTEM);
                 if (systemMessage) {
                     systemMessage.content += "\n\n" + settings.systemPromptAddition;
                 }
@@ -772,22 +852,18 @@ async function onChatCompletionSettingsReady(data) {
                     : buildFunctionTool();
 
                 if (mainTool) {
-                    data.tools = data.tools || [];
+                    if (!data.tools) data.tools = [];
                     data.tools.push(mainTool);
 
-                    // Set tool_choice if not "auto" (auto is typically the default)
-                    if (settings.mainModelToolChoice && settings.mainModelToolChoice !== "auto") {
+                    if (settings.mainModelToolChoice !== "none") {
                         data.tool_choice = settings.mainModelToolChoice;
                     }
-
-                    debugLog("Added retrieval tool to main model request with tool_choice:", settings.mainModelToolChoice);
+                    console.log(DEBUG_PREFIX, "Added tool to main model request");
                 }
             }
-
-
         }
     } catch (error) {
-        console.error(DEBUG_PREFIX, "RAG request failed:", error);
+        console.error(DEBUG_PREFIX, "Error in RAG injection:", error);
         if (error.cause) {
             console.error(DEBUG_PREFIX, "Caused by:", error.cause);
         }
@@ -803,29 +879,17 @@ async function onChatCompletionSettingsReady(data) {
 function loadSettingsUI() {
     const settings = getSettings();
 
-    $("#rag_enabled").prop("checked", settings.enabled);
-    $("#rag_filter_by_profile").prop("checked", settings.filterByProfile);
-    $("#rag_datastore_id").val(settings.datastoreId);
-    $("#rag_tool_name").val(settings.toolName);
-    $("#rag_tool_description").val(settings.toolDescription);
-    $("#rag_use_native_retrieval").prop("checked", settings.useNativeRetrieval);
-    $("#rag_retrieval_provider").val(settings.retrievalProvider);
-    $("#rag_custom_retrieval_json").val(settings.customRetrievalJson);
-    $("#rag_tool_choice").val(settings.toolChoice);
-    $("#rag_max_results").val(settings.maxResults);
-    $("#rag_max_tokens").val(settings.maxTokens);
-    $("#rag_system_prompt").val(settings.ragSystemPrompt);
-    $("#rag_user_prompt_template").val(settings.ragUserPromptTemplate);
-    $("#rag_injection_template").val(settings.injectionTemplate);
-    $("#rag_injection_role").val(settings.injectionRole);
-    $("#rag_injection_position").val(settings.injectionPosition);
-    $("#rag_injection_depth").val(settings.injectionDepth);
-    $("#rag_injection_merge").prop("checked", settings.injectionMerge);
-    $("#rag_enable_main_model_tools").prop("checked", settings.enableMainModelTools);
-    $("#rag_main_model_tool_choice").val(settings.mainModelToolChoice);
-    $("#rag_system_prompt_addition").val(settings.systemPromptAddition);
-    $("#rag_reprocess_world_info").prop("checked", settings.reprocessWorldInfo);
-    $("#rag_debug_mode").prop("checked", settings.debugMode);
+    // Load all bound settings using the UI_BINDINGS configuration
+    UI_BINDINGS.forEach(({ id, key, type }) => {
+        const $el = $(`#${id}`);
+        const value = settings[key];
+
+        if (type === 'checkbox') {
+            $el.prop('checked', value);
+        } else {
+            $el.val(value);
+        }
+    });
 
     // Populate provider dropdown
     populateProviderDropdown();
@@ -850,6 +914,11 @@ function updateToolTypeVisibility() {
     // Show/hide provider-specific fields
     $(".rag-datastore-field").toggle(useNative && provider !== "googleSearch");
     $(".rag-custom-json-field").toggle(useNative && provider === "custom");
+
+    // Validate JSON if the field became visible
+    if (useNative && provider === "custom") {
+        validateCustomJson();
+    }
 }
 
 /**
@@ -875,34 +944,54 @@ function populateProviderDropdown() {
 }
 
 /**
+ * Validate custom JSON input and provide feedback
+ */
+function validateCustomJson() {
+    const jsonStr = $("#rag_custom_retrieval_json").val();
+    const $msg = $("#rag_json_validation_msg");
+    const $field = $("#rag_custom_retrieval_json");
+
+    // Only validate if "Custom" provider is selected
+    if ($("#rag_retrieval_provider").val() !== "custom") {
+        $msg.text("").css("color", "");
+        $field.css("border-color", "");
+        return;
+    }
+
+    if (!jsonStr || jsonStr.trim() === "") {
+        $msg.text("Empty JSON").css("color", "orange");
+        $field.css("border-color", "orange");
+        return;
+    }
+
+    try {
+        JSON.parse(jsonStr);
+        $msg.text("✓ Valid JSON").css("color", "var(--smart-theme-color, #0f0)"); // Use theme color or green
+        $field.css("border-color", "var(--smart-theme-color, #0f0)");
+    } catch (e) {
+        $msg.text(`✗ Invalid JSON: ${e.message}`).css("color", "red");
+        $field.css("border-color", "red");
+    }
+}
+
+/**
  * Save settings from UI
  */
 function saveSettings() {
     const settings = extension_settings[EXTENSION_NAME];
 
-    settings.enabled = $("#rag_enabled").prop("checked");
-    settings.filterByProfile = $("#rag_filter_by_profile").prop("checked");
-    settings.datastoreId = $("#rag_datastore_id").val();
-    settings.toolName = $("#rag_tool_name").val();
-    settings.toolDescription = $("#rag_tool_description").val();
-    settings.useNativeRetrieval = $("#rag_use_native_retrieval").prop("checked");
-    settings.retrievalProvider = $("#rag_retrieval_provider").val();
-    settings.customRetrievalJson = $("#rag_custom_retrieval_json").val();
-    settings.toolChoice = $("#rag_tool_choice").val();
-    settings.maxResults = parseInt(String($("#rag_max_results").val())) || 5;
-    settings.maxTokens = parseInt(String($("#rag_max_tokens").val())) || 1000;
-    settings.ragSystemPrompt = $("#rag_system_prompt").val();
-    settings.ragUserPromptTemplate = $("#rag_user_prompt_template").val();
-    settings.injectionTemplate = $("#rag_injection_template").val();
-    settings.injectionRole = $("#rag_injection_role").val();
-    settings.injectionPosition = $("#rag_injection_position").val();
-    settings.injectionDepth = parseInt(String($("#rag_injection_depth").val())) || -1;
-    settings.injectionMerge = $("#rag_injection_merge").prop("checked");
-    settings.enableMainModelTools = $("#rag_enable_main_model_tools").prop("checked");
-    settings.mainModelToolChoice = $("#rag_main_model_tool_choice").val();
-    settings.systemPromptAddition = $("#rag_system_prompt_addition").val();
-    settings.reprocessWorldInfo = $("#rag_reprocess_world_info").prop("checked");
-    settings.debugMode = $("#rag_debug_mode").prop("checked");
+    // Save all bound settings using the UI_BINDINGS configuration
+    UI_BINDINGS.forEach(({ id, key, type, default: defaultValue }) => {
+        const $el = $(`#${id}`);
+
+        if (type === 'checkbox') {
+            settings[key] = $el.prop('checked');
+        } else if (type === 'number') {
+            settings[key] = parseInt(String($el.val()), 10) || defaultValue;
+        } else {
+            settings[key] = $el.val();
+        }
+    });
 
     saveSettingsDebounced();
 }
@@ -983,38 +1072,29 @@ jQuery(async () => {
         $("#rag_profile_filter_section").hide();
     }
 
-    // Set up event listeners for settings changes
-    $("#rag_enabled").on("change", saveSettings);
-    $("#rag_filter_by_profile").on("change", saveSettings);
-    $("#rag_datastore_id").on("input", saveSettings);
-    $("#rag_tool_name").on("input", saveSettings);
-    $("#rag_tool_description").on("input", saveSettings);
-    $("#rag_use_native_retrieval").on("change", () => {
-        updateToolTypeVisibility();
-        saveSettings();
+    // Set up event listeners for settings changes using UI_BINDINGS
+    // Map of extra handler names to their functions
+    const extraHandlers = {
+        updateToolTypeVisibility,
+        updateInjectionPositionVisibility,
+        validateCustomJson,
+    };
+
+    UI_BINDINGS.forEach(({ id, type, onChangeExtra }) => {
+        const $el = $(`#${id}`);
+        // Use 'change' for checkboxes and selects, 'input' for text/number fields
+        const eventType = (type === 'checkbox' || type === 'select') ? 'change' : 'input';
+
+        if (onChangeExtra && extraHandlers[onChangeExtra]) {
+            // Element has a side effect handler
+            $el.on(eventType, () => {
+                extraHandlers[onChangeExtra]();
+                saveSettings();
+            });
+        } else {
+            $el.on(eventType, saveSettings);
+        }
     });
-    $("#rag_retrieval_provider").on("change", () => {
-        updateToolTypeVisibility();
-        saveSettings();
-    });
-    $("#rag_custom_retrieval_json").on("input", saveSettings);
-    $("#rag_tool_choice").on("change", saveSettings);
-    $("#rag_max_results").on("input", saveSettings);
-    $("#rag_max_tokens").on("input", saveSettings);
-    $("#rag_system_prompt").on("input", saveSettings);
-    $("#rag_user_prompt_template").on("input", saveSettings);
-    $("#rag_injection_template").on("input", saveSettings);
-    $("#rag_injection_role").on("change", saveSettings);
-    $("#rag_injection_position").on("change", () => {
-        updateInjectionPositionVisibility();
-        saveSettings();
-    });
-    $("#rag_injection_depth").on("input", saveSettings);
-    $("#rag_injection_merge").on("change", saveSettings);
-    $("#rag_enable_main_model_tools").on("change", saveSettings);
-    $("#rag_main_model_tool_choice").on("change", saveSettings);
-    $("#rag_system_prompt_addition").on("input", saveSettings);
-    $("#rag_debug_mode").on("change", saveSettings);
 
     // Register the main event handler
     eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, onChatCompletionSettingsReady);
