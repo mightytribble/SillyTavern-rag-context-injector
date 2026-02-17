@@ -334,66 +334,22 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
 
     // 2. Use SillyTavern's native macro substitution if available
     if (context && typeof context.substituteParams === 'function') {
-        // substituteParams uses the current global state (character, chat, etc)
-        // This is robust and supports {{scenario}}, {{char}}, {{user}}, etc.
+        // substituteParams handles standard ST macros: {{scenario}}, {{char}}, {{user}}, etc.
         result = context.substituteParams(result);
-
-        // 3. Handle patterns that native macros might miss or that we want to support specifically
-        // (Native engine handles most things now, but we'll keep our slicers just in case if they aren't standard)
-        // ... Native engine likely handles custom macros too.
-
-        return result;
     }
 
-    // Fallback: If substituteParams is missing (should not happen if extension API is modern)
-    let characterName = context?.name2 || "Assistant";
-    let userName = context?.name1 || "User";
-    let description = context?.description || "";
-    let personality = context?.personality || "";
-    let scenario = context?.scenario || "";
-
-    // Attempt to get data from character card fields (more reliable for detailed fields)
-    if (context && typeof context.getCharacterCardFields === 'function') {
-        try {
-            const fields = context.getCharacterCardFields();
-            if (fields) {
-                if (fields.name) characterName = fields.name;
-                if (fields.description) description = fields.description;
-                if (fields.personality) personality = fields.personality;
-                if (fields.scenario) scenario = fields.scenario;
-            }
-        } catch (e) {
-            // Fallback to standard context properties
-            console.warn(DEBUG_PREFIX, "Error fetching character card fields:", e);
-        }
-    }
-
-    // Use global chat history for macros as it's more reliable than prompt messages
-    // promptMessages only contains what's being sent to LLM (often truncated or system-only)
+    // 3. Handle extension-specific macros that the native engine doesn't know about
+    //    (fullHistory, recentHistory, lastMessage, lastNMessages, messages slicing)
     const globalChat = context?.chat || [];
     const messages = convertSillyTavernToOpenAI(globalChat);
 
-    // Base replacements derived from messages
-    const baseVars = {
+    const extensionVars = {
         lastMessage: getLastUserMessage(messages),
         recentHistory: getRecentHistory(messages, 10),
         fullHistory: formatMessagesForContext(messages.filter(m => m.role !== ROLES.SYSTEM)),
-        characterName: characterName,
-        char: characterName,
-        Char: characterName, // Capitalized alias
-        userName: userName,
-        user: userName,
-        User: userName, // Capitalized alias
-        description: description,
-        personality: personality,
-        scenario: scenario,
     };
 
-    // Merge with extra replacements (extras override base)
-    const allVars = { ...baseVars, ...extraReplacements };
-
-    for (const [key, value] of Object.entries(allVars)) {
-        // Use a function replacer to avoid issues with special chars in value
+    for (const [key, value] of Object.entries(extensionVars)) {
         result = result.replace(new RegExp(`{{${key}}}`, 'g'), () => value || "");
     }
 
@@ -404,15 +360,11 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
     });
 
     // Handle {{messages:start:end}} pattern (Python-style slicing)
-    // Examples: {{messages:-5}} (last 5), {{messages:0:3}} (first 3), {{messages:-7:-3}} (range)
     const slicePattern = /{{messages:(-?\d+)(?::(-?\d+))?}}/g;
     result = result.replace(slicePattern, (match, start, end) => {
         let startIdx = parseInt(start, 10);
         const endIdx = end ? parseInt(end, 10) : undefined;
         const chatMessages = messages.filter(m => m.role !== ROLES.SYSTEM);
-
-        // Graceful handling for negative indices that exceed length
-        // e.g. slice(-10) on array of length 8 should be slice(0)
         if (startIdx < 0 && Math.abs(startIdx) > chatMessages.length) {
             startIdx = 0;
         }
@@ -422,6 +374,8 @@ function replaceTemplateVars(template, promptMessages, extraReplacements = {}) {
 
     return result;
 }
+
+
 
 /**
  * Reconstruct messages if they are missing from the request data
